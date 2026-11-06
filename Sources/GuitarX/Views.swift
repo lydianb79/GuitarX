@@ -585,6 +585,22 @@ struct SidebarView: View {
                     ForEach(WoodStyle.allCases) { Text($0.rawValue).tag($0) }
                 }
             }
+
+            Section("Sound") {
+                Picker("Instrument", selection: $state.tone) {
+                    ForEach(GuitarTone.allCases) { Text($0.rawValue).tag($0) }
+                }
+                if state.tone != .synth && state.tuning.id.hasPrefix("Bass") {
+                    Text("Bass tunings use the fingered bass sample.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if state.tone != .synth && !state.samplesAvailable {
+                    Text("macOS guitar samples not found; using the synth.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
         }
         .formStyle(.grouped)
         .toggleStyle(.switch)

@@ -75,6 +75,7 @@ struct NoteEvent {
     let pos: FretPos?
     let midi: Int
     let time: Double
+    var length: Double = 3.0
 }
 
 /// Everything the fretboard needs to know about what is currently shown.
@@ -135,6 +136,15 @@ final class AppState: ObservableObject {
     }
     @Published var fretCount: Int = 22 { didSet { voicingIndex = 0 } }
     @Published var wood: WoodStyle = .ebony
+    @Published var tone: GuitarTone = .steel { didSet { synth.preload(program: soundProgram) } }
+
+    /// GM program actually used: bass tunings get the bass sample, nil = synth.
+    var soundProgram: UInt8? {
+        guard let p = tone.program else { return nil }
+        return tuning.id.hasPrefix("Bass") ? GuitarTone.fingeredBass : p
+    }
+
+    var samplesAvailable: Bool { synth.samplesAvailable }
 
     // Display
     @Published var labelMode: LabelMode = .notes
@@ -159,6 +169,14 @@ final class AppState: ObservableObject {
     private var progVoicingCache: [Voicing?] = []
     private var playbackToken = 0
     private lazy var synth = GuitarSynth()
+
+    init() {
+        // Load the guitar samples shortly after launch so the first note plays instantly.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self else { return }
+            self.synth.preload(program: self.soundProgram)
+        }
+    }
 
     // MARK: - Basic derived values
 
@@ -756,7 +774,7 @@ final class AppState: ObservableObject {
             }
         } else {
             for (i, n) in scaleRun().enumerated() {
-                events.append(NoteEvent(pos: n.pos, midi: n.midi, time: Double(i) * 0.2))
+                events.append(NoteEvent(pos: n.pos, midi: n.midi, time: Double(i) * 0.2, length: 0.6))
             }
         }
         guard !events.isEmpty else { return }
@@ -817,7 +835,7 @@ final class AppState: ObservableObject {
     }
 
     private func trigger(_ events: [NoteEvent]) {
-        synth.play(events.map { SynthNote(midi: $0.midi, time: $0.time) })
+        synth.play(events.map { SynthNote(midi: $0.midi, time: $0.time, length: $0.length) }, program: soundProgram)
         let now = CACurrentMediaTime() + 0.05
         for e in events {
             if let p = e.pos { pulses[p] = now + e.time }
@@ -853,7 +871,7 @@ final class AppState: ObservableObject {
 
         isPlaying = true
         progressionStep = 0
-        synth.play(notes)
+        synth.play(notes, program: soundProgram)
         let start = DispatchTime.now() + 0.06
         for (i, evs) in stepNotes.enumerated() {
             DispatchQueue.main.asyncAfter(deadline: start + Double(i) * chordDur) { [weak self] in

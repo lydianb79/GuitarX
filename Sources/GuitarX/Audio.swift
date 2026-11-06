@@ -1,4 +1,5 @@
 import AVFoundation
+import AudioToolbox
 
 struct SynthNote {
     let midi: Int
@@ -6,35 +7,194 @@ struct SynthNote {
     var length: Double = 4.5
 }
 
-/// Tiny Karplus–Strong plucked-string synth so you can hear what you see.
+/// Playback sound. Sampled tones use the General MIDI guitar samples that ship with macOS.
+enum GuitarTone: String, CaseIterable, Identifiable {
+    case steel = "Steel-String Acoustic"
+    case nylon = "Nylon-String Classical"
+    case jazz = "Jazz Electric"
+    case clean = "Clean Electric"
+    case muted = "Muted Electric"
+    case overdrive = "Overdriven Electric"
+    case synth = "Plucked Synth"
+
+    var id: String { rawValue }
+
+    /// General MIDI program number (0-based), nil for the built-in synth.
+    var program: UInt8? {
+        switch self {
+        case .nylon: return 24
+        case .steel: return 25
+        case .jazz: return 26
+        case .clean: return 27
+        case .muted: return 28
+        case .overdrive: return 29
+        case .synth: return nil
+        }
+    }
+
+    static let fingeredBass: UInt8 = 33
+}
+
+/// Plays notes either through Apple's sampler (real recorded guitars) or a Karplus–Strong fallback synth.
 final class GuitarSynth {
+    static let soundBankURL = URL(fileURLWithPath:
+        "/System/Library/Components/CoreAudio.component/Contents/Resources/gs_instruments.dls")
+
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
+    private let sampler = AVAudioUnitSampler()
+    private let submix = AVAudioMixerNode()
     private let reverb = AVAudioUnitReverb()
+    private lazy var sequencer = AVAudioSequencer(audioEngine: engine)
     private let sampleRate: Double = 44_100
     private let format: AVAudioFormat
     private let queue = DispatchQueue(label: "GuitarX.synth", qos: .userInitiated)
 
+    private var loadedProgram: UInt8? = nil
+    private var noteTokens: [UInt8: Int] = [:]
+    private var tokenCounter = 0
+    private(set) var samplesAvailable = FileManager.default.fileExists(atPath: GuitarSynth.soundBankURL.path)
+
     init() {
         format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2)!
         engine.attach(player)
+        engine.attach(sampler)
+        engine.attach(submix)
         engine.attach(reverb)
         reverb.loadFactoryPreset(.mediumRoom)
-        reverb.wetDryMix = 16
-        engine.connect(player, to: reverb, format: format)
+        reverb.wetDryMix = 14
+        engine.connect(player, to: submix, fromBus: 0, toBus: 0, format: format)
+        engine.connect(sampler, to: submix, fromBus: 0, toBus: 1, format: nil)
+        engine.connect(submix, to: reverb, format: format)
         engine.connect(reverb, to: engine.mainMixerNode, format: format)
+        engine.prepare()
     }
 
-    func play(_ notes: [SynthNote]) {
+    // MARK: Public
+
+    /// Loads a sampled instrument ahead of time so the first note isn't delayed.
+    func preload(program: UInt8?) {
+        guard let program else { return }
+        _ = loadProgram(program)
+    }
+
+    /// Plays notes with the given GM program (nil = plucked synth).
+    func play(_ notes: [SynthNote], program: UInt8?) {
         guard !notes.isEmpty else { return }
-        queue.async { [weak self] in self?.render(notes) }
+        if let program, loadProgram(program), ensureRunning() {
+            playSampled(notes)
+        } else {
+            queue.async { [weak self] in self?.render(notes) }
+        }
     }
 
     func stop() {
+        stopSequence()
+        allNotesOff()
         queue.async {
             DispatchQueue.main.async { [self] in player.stop() }
         }
     }
+
+    // MARK: Sampler
+
+    private func ensureRunning() -> Bool {
+        if engine.isRunning { return true }
+        do {
+            try engine.start()
+            return true
+        } catch {
+            NSLog("GuitarX audio error: \(error)")
+            return false
+        }
+    }
+
+    private func loadProgram(_ program: UInt8) -> Bool {
+        guard samplesAvailable else { return false }
+        if loadedProgram == program { return true }
+        do {
+            try sampler.loadSoundBankInstrument(at: GuitarSynth.soundBankURL, program: program,
+                                                bankMSB: UInt8(kAUSampler_DefaultMelodicBankMSB),
+                                                bankLSB: UInt8(kAUSampler_DefaultBankLSB))
+            loadedProgram = program
+            return true
+        } catch {
+            NSLog("GuitarX: could not load guitar samples (\(error)); using the synth instead")
+            samplesAvailable = false
+            return false
+        }
+    }
+
+    private func playSampled(_ notes: [SynthNote]) {
+        stopSequence()
+
+        // A single click: play it immediately and let other strings keep ringing.
+        if notes.count == 1, notes[0].time == 0 {
+            let n = notes[0]
+            let key = UInt8(clamping: n.midi)
+            sampler.stopNote(key, onChannel: 0)
+            sampler.startNote(key, withVelocity: 100, onChannel: 0)
+            tokenCounter += 1
+            let token = tokenCounter
+            noteTokens[key] = token
+            DispatchQueue.main.asyncAfter(deadline: .now() + min(n.length, 3.5)) { [weak self] in
+                guard let self, self.noteTokens[key] == token else { return }
+                self.sampler.stopNote(key, onChannel: 0)
+            }
+            return
+        }
+
+        allNotesOff()
+        guard let data = GuitarSynth.midiData(for: notes) else { return }
+        do {
+            try sequencer.load(from: data, options: [])
+            for track in sequencer.tracks { track.destinationAudioUnit = sampler }
+            sequencer.currentPositionInSeconds = 0
+            sequencer.prepareToPlay()
+            try sequencer.start()
+        } catch {
+            NSLog("GuitarX sequencer error: \(error)")
+        }
+    }
+
+    private func stopSequence() {
+        if sequencer.isPlaying { sequencer.stop() }
+    }
+
+    private func allNotesOff() {
+        noteTokens.removeAll()
+        for key in UInt8(0)...UInt8(127) { sampler.stopNote(key, onChannel: 0) }
+    }
+
+    /// Builds a one-track Standard MIDI File at 60 BPM, so beats equal seconds.
+    private static func midiData(for notes: [SynthNote]) -> Data? {
+        var seqRef: MusicSequence?
+        guard NewMusicSequence(&seqRef) == noErr, let seq = seqRef else { return nil }
+        defer { _ = DisposeMusicSequence(seq) }
+
+        var tempoRef: MusicTrack?
+        if MusicSequenceGetTempoTrack(seq, &tempoRef) == noErr, let tempo = tempoRef {
+            _ = MusicTrackNewExtendedTempoEvent(tempo, 0, 60)
+        }
+        var trackRef: MusicTrack?
+        guard MusicSequenceNewTrack(seq, &trackRef) == noErr, let track = trackRef else { return nil }
+
+        for n in notes {
+            var msg = MIDINoteMessage(channel: 0,
+                                      note: UInt8(clamping: n.midi),
+                                      velocity: UInt8.random(in: 86...106),
+                                      releaseVelocity: 0,
+                                      duration: Float32(max(0.05, min(n.length, 4.0))))
+            _ = MusicTrackNewMIDINoteEvent(track, MusicTimeStamp(max(0, n.time)), &msg)
+        }
+
+        var out: Unmanaged<CFData>?
+        guard MusicSequenceFileCreateData(seq, .midiType, .eraseFile, 480, &out) == noErr,
+              let cf = out?.takeRetainedValue() else { return nil }
+        return cf as Data
+    }
+
+    // MARK: Karplus–Strong fallback
 
     private func render(_ notes: [SynthNote]) {
         let total = notes.map { $0.time + min($0.length, 2.4) }.max() ?? 2.4
