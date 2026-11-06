@@ -78,6 +78,8 @@ struct DisplayContext {
     var voicing: Voicing? = nil
     var useVoicing = false
     var window: ClosedRange<Int>? = nil
+    /// Exact set of positions to show as active (e.g. a CAGED scale pattern); others are ghosted.
+    var allowed: Set<FretPos>? = nil
     var accent: Set<FretPos> = []
     var bassRel: Int? = nil
 }
@@ -266,6 +268,68 @@ final class AppState: ObservableObject {
         return scalePosition <= shapes.count ? shapes[scalePosition - 1] : nil
     }
 
+    /// The CAGED scale fingering around a chord shape: one position per pitch, within one hand position.
+    func cagedScalePattern(_ shape: PlacedShape) -> Set<FretPos> {
+        let notes = tuning.notes
+        guard let o = CAGED.stringOffset(notes) else { return [] }
+        let strings = Array(o..<(o + 6))
+        let pcs = Set(scale.intervals.map { mod12(rootPC + $0.semitones) })
+        let mn = shape.minFret
+        let mx = shape.maxFret
+        let lo = max(0, mn - 1)
+        let hi = min(fretCount, mx + 1)
+        guard lo <= hi else { return [] }
+        let chordPositions = Set(shape.positions)
+
+        // Every scale note in the hand position, grouped by pitch (lowest string first).
+        var candidates: [Int: [FretPos]] = [:]
+        for st in strings {
+            for f in lo...hi where pcs.contains(mod12(notes[st] + f)) {
+                candidates[notes[st] + f, default: []].append(FretPos(string: st, fret: f))
+            }
+        }
+
+        // 1) Chord-shape tones and notes inside the chord shape's fret span.
+        var chosen: [Int: FretPos] = [:]
+        for (midi, cs) in candidates {
+            if let c = cs.first(where: { chordPositions.contains($0) })
+                ?? cs.first(where: { $0.fret >= mn && $0.fret <= mx }) {
+                chosen[midi] = c
+            }
+        }
+        var count: [Int: Int] = [:]
+        for p in chosen.values { count[p.string, default: 0] += 1 }
+        guard let lowMidi = chosen.keys.min(), let highMidi = chosen.keys.max() else { return [] }
+
+        // 2) Fill gaps inside that range with a one-fret stretch, on the emptier string.
+        for midi in candidates.keys.sorted() where chosen[midi] == nil && midi > lowMidi && midi < highMidi {
+            guard let best = candidates[midi]?.min(by: { a, b in
+                let ca = count[a.string, default: 0], cb = count[b.string, default: 0]
+                return ca != cb ? ca < cb : a.fret < b.fret
+            }) else { continue }
+            chosen[midi] = best
+            count[best.string, default: 0] += 1
+        }
+
+        // 3) Complete the two outer strings (2 notes for pentatonics, 3 for 7+ note scales).
+        let limit = pcs.count >= 7 ? 3 : 2
+        let top = strings[strings.count - 1]
+        let bottom = strings[0]
+        for midi in candidates.keys.sorted() where midi > highMidi {
+            if count[top, default: 0] < limit, let p = candidates[midi]?.first(where: { $0.string == top }) {
+                chosen[midi] = p
+                count[top, default: 0] += 1
+            }
+        }
+        for midi in candidates.keys.sorted(by: >) where midi < lowMidi {
+            if count[bottom, default: 0] < limit, let p = candidates[midi]?.first(where: { $0.string == bottom }) {
+                chosen[midi] = p
+                count[bottom, default: 0] += 1
+            }
+        }
+        return Set(chosen.values)
+    }
+
     // MARK: - Chord voicings & CAGED
 
     var voicings: [Voicing] {
@@ -410,7 +474,7 @@ final class AppState: ObservableObject {
                     if scalePosition <= p.count { ctx.window = p[scalePosition - 1] }
                 case .caged:
                     if let s = selectedScaleShape {
-                        ctx.window = max(0, s.minFret - 1)...min(fretCount, s.maxFret + 1)
+                        ctx.allowed = cagedScalePattern(s)
                         ctx.accent = Set(s.positions)
                     }
                 }
@@ -483,7 +547,9 @@ final class AppState: ObservableObject {
                             role = .ghost
                         }
                     } else {
-                        if let w = ctx.window, !w.contains(f) {
+                        if let allowed = ctx.allowed, !allowed.contains(pos) {
+                            role = .ghost
+                        } else if let w = ctx.window, !w.contains(f) {
                             role = .ghost
                         } else if ctx.accent.contains(pos) {
                             role = .accent

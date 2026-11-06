@@ -420,7 +420,9 @@ struct PositionSelector: View {
         case .caged:
             if state.scaleCAGEDShapes.isEmpty { return "CAGED needs a 6-string tuning in standard intervals" }
             if let s = state.selectedScaleShape {
-                return "\(s.shape.rawValue) shape · frets \(max(0, s.minFret - 1))–\(s.maxFret + 1)"
+                let frets = state.cagedScalePattern(s).map(\.fret)
+                let lo = frets.min() ?? s.minFret, hi = frets.max() ?? s.maxFret
+                return "\(s.shape.rawValue) shape · frets \(lo)–\(hi) · ringed = \(s.shape.rawValue) chord"
             }
             return "Whole neck"
         }
