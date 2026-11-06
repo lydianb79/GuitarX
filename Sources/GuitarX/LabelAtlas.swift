@@ -65,10 +65,7 @@ final class LabelAtlas {
             ctx.textMatrix = .identity
 
             func makeLine(_ fontSize: CGFloat) -> (CTLine, NSFont, CGFloat) {
-                var font = NSFont.systemFont(ofSize: fontSize, weight: bold ? .bold : .medium)
-                if let d = font.fontDescriptor.withDesign(.rounded), let rf = NSFont(descriptor: d, size: fontSize) {
-                    font = rf
-                }
+                let font = NSFont.systemFont(ofSize: fontSize, weight: bold ? .semibold : .regular)
                 let attr = NSAttributedString(string: text, attributes: [
                     .font: font,
                     .foregroundColor: NSColor.white

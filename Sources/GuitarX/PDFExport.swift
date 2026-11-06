@@ -31,9 +31,8 @@ enum PDFExporter {
 
     private static func capture(state: AppState) -> Item? {
         guard let renderer = state.renderer else { return nil }
-        let strings = state.tuning.notes.count
         let width = 1400
-        let height = Int(70 + 34 * (Double(strings) + 0.2))
+        let height = Int(FretboardLayout.idealHeight(strings: state.tuning.notes.count))
         guard let image = renderer.renderImage(width: width, height: height) else { return nil }
         return Item(title: state.title, subtitle: state.subtitle, detail: detailLine(state), image: image)
     }

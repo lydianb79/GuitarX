@@ -1,6 +1,8 @@
 import SwiftUI
 
-let appBackground = Color(red: 0.055, green: 0.055, blue: 0.065)
+let appBackground = Color(red: 0.094, green: 0.094, blue: 0.104)
+let surface = Color.white.opacity(0.045)
+let hairline = Color.white.opacity(0.08)
 
 struct ContentView: View {
     @EnvironmentObject var state: AppState
@@ -8,15 +10,47 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             SidebarView()
-                .navigationSplitViewColumnWidth(min: 300, ideal: 320, max: 400)
+                .navigationSplitViewColumnWidth(min: 280, ideal: 300, max: 360)
         } detail: {
             VStack(spacing: 0) {
                 HeaderView()
                 FretboardView(state: state)
-                    .frame(minHeight: 280)
-                InfoPanel()
+                    .frame(height: FretboardLayout.idealHeight(strings: state.tuning.notes.count))
+                StatusBar()
+                Divider().overlay(hairline)
+                ScrollView(.vertical) {
+                    InfoPanel()
+                }
             }
             .background(appBackground)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Picker("Mode", selection: $state.mode) {
+                        ForEach(ViewMode.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 300)
+                    .help("Scale ⌘1 · Chord ⌘2 · Progression ⌘3")
+                }
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Menu {
+                        Button("This View…") { PDFExporter.exportCurrentView(state: state) }
+                        Button("\(state.exportAllLabel)…") { PDFExporter.exportAll(state: state) }
+                    } label: {
+                        Label("Export PDF", systemImage: "square.and.arrow.up")
+                    }
+                    .help("Export as PDF (⌘E, ⇧⌘E)")
+                    Button {
+                        state.playSelection()
+                    } label: {
+                        Label(state.isPlaying ? "Stop" : "Play",
+                              systemImage: state.isPlaying ? "stop.fill" : "play.fill")
+                    }
+                    .help("Play / stop (Space)")
+                }
+            }
+            .navigationTitle("GuitarX")
         }
         .preferredColorScheme(.dark)
     }
@@ -28,49 +62,93 @@ struct HeaderView: View {
     @EnvironmentObject var state: AppState
 
     var body: some View {
-        HStack(alignment: .center, spacing: 16) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text(state.title)
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
-                    .lineLimit(1)
-                Text(state.subtitle)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 12)
-            if let h = state.hover {
-                Text(state.describe(h))
-                    .font(.system(size: 12.5, weight: .medium, design: .monospaced))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(Capsule().fill(Color.white.opacity(0.07)))
-            }
-            Menu {
-                Button("This View…") { PDFExporter.exportCurrentView(state: state) }
-                Button("\(state.exportAllLabel)…") { PDFExporter.exportAll(state: state) }
-            } label: {
-                Label("Export PDF", systemImage: "square.and.arrow.up")
-            }
-            .menuStyle(.button)
-            .controlSize(.large)
-            .fixedSize()
-            .help("Export as PDF (⌘E / ⇧⌘E)")
-            Button {
-                state.playSelection()
-            } label: {
-                Label(state.isPlaying ? "Stop" : "Play",
-                      systemImage: state.isPlaying ? "stop.fill" : "play.fill")
-                    .font(.system(size: 13, weight: .semibold))
-                    .padding(.horizontal, 6)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .help("Play / stop (Space)")
+        HStack(alignment: .firstTextBaseline, spacing: 14) {
+            Text(state.title)
+                .font(.system(size: 24, weight: .semibold))
+                .lineLimit(1)
+            Text(state.subtitle)
+                .font(.system(size: 12.5))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 24)
-        .padding(.top, 18)
-        .padding(.bottom, 6)
+        .padding(.top, 16)
+        .padding(.bottom, 4)
+    }
+}
+
+// MARK: - Status bar under the fretboard
+
+struct StatusBar: View {
+    @EnvironmentObject var state: AppState
+
+    var body: some View {
+        HStack(spacing: 16) {
+            if let h = state.hover {
+                Text(state.describe(h))
+                    .foregroundStyle(.primary)
+            } else {
+                Text("Hover a note to inspect it · click to hear it")
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer(minLength: 12)
+            ColorLegend()
+        }
+        .font(.system(size: 11.5))
+        .monospacedDigit()
+        .padding(.horizontal, 24)
+        .frame(height: 30)
+    }
+}
+
+struct ColorLegend: View {
+    @EnvironmentObject var state: AppState
+
+    struct Entry: Identifiable {
+        let name: String
+        let rgb: SIMD3<Float>
+        var id: String { name }
+    }
+
+    private var entries: [Entry] {
+        switch state.colorMode {
+        case .function:
+            return [Entry(name: "Root", rgb: Palette.root),
+                    Entry(name: "3rd", rgb: Palette.function[3] ?? Palette.neutral),
+                    Entry(name: "5th", rgb: Palette.function[5] ?? Palette.neutral),
+                    Entry(name: "7th", rgb: Palette.function[7] ?? Palette.neutral),
+                    Entry(name: "Other", rgb: Palette.neutral)]
+        case .spectrum:
+            return (1...7).map { Entry(name: "\($0)", rgb: Palette.spectrum[$0]) }
+        case .rootOnly:
+            return [Entry(name: "Root", rgb: Palette.root), Entry(name: "Other", rgb: Palette.neutral)]
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ForEach(entries) { e in
+                HStack(spacing: 5) {
+                    Circle().fill(Palette.color(e.rgb)).frame(width: 8, height: 8)
+                    Text(e.name).foregroundStyle(.secondary)
+                }
+            }
+            if showsRingHint {
+                HStack(spacing: 5) {
+                    Circle().strokeBorder(Color.white.opacity(0.85), lineWidth: 1.3).frame(width: 10, height: 10)
+                    Text(ringHint).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var showsRingHint: Bool {
+        state.mode != .scale || state.selectedScaleShape != nil
+    }
+
+    private var ringHint: String {
+        state.mode == .scale ? "Shape tone" : "Bass"
     }
 }
 
@@ -81,8 +159,8 @@ struct SectionLabel: View {
     init(_ text: String) { self.text = text }
     var body: some View {
         Text(text)
-            .font(.system(size: 10.5, weight: .bold))
-            .tracking(1.2)
+            .font(.system(size: 10, weight: .semibold))
+            .tracking(0.9)
             .foregroundStyle(.secondary)
     }
 }
@@ -96,11 +174,14 @@ struct PillButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .frame(minWidth: minWidth, minHeight: 26)
-                .padding(.horizontal, 3)
-                .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(selected ? Color.accentColor : Color.white.opacity(0.07)))
+                .font(.system(size: 12, weight: .medium))
+                .monospacedDigit()
+                .frame(minWidth: minWidth, minHeight: 24)
+                .padding(.horizontal, 4)
+                .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(selected ? Color.accentColor : surface))
+                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(selected ? Color.clear : hairline))
                 .foregroundStyle(selected ? Color.white : Color.primary)
                 .contentShape(Rectangle())
         }
@@ -108,31 +189,67 @@ struct PillButton: View {
     }
 }
 
-struct ChordChip: View {
+/// Dark tile with a small caption on top and a value below; used for chords and notes.
+struct Tile: View {
     let top: String
     let bottom: String
-    let selected: Bool
+    var accent: Color? = nil
+    var selected = false
+    var dimmed = false
+    var minWidth: CGFloat = 60
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 2) {
-                Text(top)
-                    .font(.system(size: 11, weight: .bold, design: .serif))
-                    .foregroundStyle(selected ? Color.white.opacity(0.85) : Color.secondary)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 5) {
+                    if let accent {
+                        Circle().fill(accent).frame(width: 7, height: 7)
+                    }
+                    Text(top)
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(selected ? Color.white.opacity(0.8) : Color.secondary)
+                }
                 Text(bottom)
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(selected ? Color.white : Color.primary)
             }
-            .frame(minWidth: 62, minHeight: 46)
-            .padding(.horizontal, 4)
-            .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(selected ? Color.accentColor : Color.white.opacity(0.06)))
-            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .strokeBorder(Color.white.opacity(selected ? 0 : 0.09)))
+            .frame(minWidth: minWidth, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(selected ? Color.accentColor : surface))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(selected ? Color.clear : hairline))
+            .opacity(dimmed ? 0.35 : 1)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+struct Stepper3: View {
+    let title: String
+    let subtitle: String
+    let back: () -> Void
+    let forward: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: back) { Image(systemName: "chevron.left").frame(width: 12, height: 14) }
+            VStack(spacing: 1) {
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .monospacedDigit()
+                Text(subtitle)
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(minWidth: 110)
+            Button(action: forward) { Image(systemName: "chevron.right").frame(width: 12, height: 14) }
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.regular)
     }
 }
 
@@ -142,10 +259,10 @@ struct InfoPanel: View {
     @EnvironmentObject var state: AppState
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .top, spacing: 28) {
                 VStack(alignment: .leading, spacing: 8) {
-                    SectionLabel("NOTES  ·  CLICK TO HIDE / SHOW")
+                    SectionLabel(state.mode == .scale ? "SCALE TONES" : "CHORD TONES")
                     NotesRow()
                 }
                 Spacer(minLength: 0)
@@ -157,7 +274,7 @@ struct InfoPanel: View {
             }
             if state.mode == .scale && !state.harmonized.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    SectionLabel("DIATONIC 7TH CHORDS  ·  CLICK TO EXPLORE")
+                    SectionLabel("DIATONIC SEVENTH CHORDS")
                     HarmonyRow()
                 }
             }
@@ -166,8 +283,8 @@ struct InfoPanel: View {
             }
         }
         .padding(.horizontal, 24)
-        .padding(.top, 6)
-        .padding(.bottom, 20)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -177,28 +294,16 @@ struct NotesRow: View {
     var body: some View {
         let ivs = state.currentIntervals
         let names = state.spelledNotes
-        HStack(spacing: 7) {
+        HStack(spacing: 6) {
             ForEach(Array(ivs.enumerated()), id: \.offset) { i, iv in
-                let hidden = state.hiddenPCs.contains(iv.pitchClass)
-                let color = Palette.color(degree: iv.simpleDegree, isRoot: iv.pitchClass == 0,
-                                          colorful: state.colorByInterval)
-                Button {
+                Tile(top: iv.label,
+                     bottom: names[i].text,
+                     accent: Palette.color(degree: iv.simpleDegree, isRoot: iv.pitchClass == 0, mode: state.colorMode),
+                     dimmed: state.hiddenPCs.contains(iv.pitchClass),
+                     minWidth: 34) {
                     state.toggleHidden(iv.pitchClass)
-                } label: {
-                    VStack(spacing: 1) {
-                        Text(names[i].text)
-                            .font(.system(size: 17, weight: .bold, design: .rounded))
-                        Text(iv.label)
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
-                            .opacity(0.7)
-                    }
-                    .foregroundStyle(Color.black.opacity(0.85))
-                    .frame(minWidth: 44, minHeight: 50)
-                    .padding(.horizontal, 3)
-                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(color))
-                    .opacity(hidden ? 0.22 : 1)
                 }
-                .buttonStyle(.plain)
+                .help("Click to hide or show \(names[i].text) on the fretboard")
             }
         }
     }
@@ -211,28 +316,18 @@ struct VoicingNavigator: View {
         VStack(alignment: .trailing, spacing: 8) {
             switch state.chordDisplay {
             case .voicings:
-                SectionLabel("VOICING  ·  ⌥← ⌥→")
+                SectionLabel("VOICING")
                 let all = state.voicings
                 if let v = state.currentVoicing {
-                    HStack(spacing: 10) {
-                        Button { state.step(-1) } label: { Image(systemName: "chevron.left").frame(width: 14) }
-                        VStack(spacing: 2) {
-                            Text("\(min(state.voicingIndex, all.count - 1) + 1) / \(all.count)")
-                                .font(.system(size: 15, weight: .bold, design: .rounded))
-                                .monospacedDigit()
-                            Text(v.shorthand)
-                                .font(.system(size: 13, weight: .medium, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(minWidth: 120)
-                        Button { state.step(1) } label: { Image(systemName: "chevron.right").frame(width: 14) }
-                    }
-                    .buttonStyle(.bordered)
+                    Stepper3(title: "\(min(state.voicingIndex, all.count - 1) + 1) of \(all.count)",
+                             subtitle: v.shorthand,
+                             back: { state.step(-1) }, forward: { state.step(1) })
+                        .help("Previous / next voicing (⌥← ⌥→)")
                     Text(v.minFret == 0 ? "Open position" : "Frets \(v.minFret)–\(v.maxFret)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    Text("No playable voicing for this\ninversion / string count")
+                    Text("No playable voicing for this\ninversion and string count")
                         .font(.callout)
                         .multilineTextAlignment(.trailing)
                         .foregroundStyle(.secondary)
@@ -242,12 +337,12 @@ struct VoicingNavigator: View {
                 SectionLabel("ALL CHORD TONES")
                 Text(state.inversion == 0
                      ? "Root position"
-                     : "Bass (ringed): \(state.rootName.adding(state.bassInterval).text)")
+                     : "Bass note \(state.rootName.adding(state.bassInterval).text) is ringed")
                     .font(.callout)
                     .foregroundStyle(.secondary)
 
             case .caged:
-                SectionLabel("CAGED SHAPE  ·  ⌥← ⌥→")
+                SectionLabel("CAGED SHAPE")
                 let shapes = state.chordCAGEDShapes
                 if shapes.isEmpty {
                     Text("CAGED needs a 6-string tuning\nin standard intervals")
@@ -259,14 +354,15 @@ struct VoicingNavigator: View {
                         ForEach(Array(shapes.enumerated()), id: \.offset) { i, s in
                             PillButton(title: s.shape.rawValue,
                                        selected: min(state.cagedIndex, shapes.count - 1) == i,
-                                       minWidth: 34) { state.cagedIndex = i }
+                                       minWidth: 32) { state.cagedIndex = i }
                         }
                     }
+                    .help("Shapes in neck order (⌥← ⌥→)")
                     if let s = state.currentChordShape {
                         Text(state.chordHasExactCAGED
-                             ? "\(s.voicing.shorthand)  ·  frets \(s.minFret)–\(s.maxFret)"
+                             ? "\(s.voicing.shorthand)   ·   frets \(s.minFret)–\(s.maxFret)"
                              : "Chord tones in the \(s.shape.rawValue)-shape region, frets \(s.minFret)–\(s.maxFret)")
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -281,13 +377,14 @@ struct PositionSelector: View {
     var body: some View {
         VStack(alignment: .trailing, spacing: 8) {
             HStack(spacing: 10) {
-                SectionLabel("POSITION  ·  ⌥← ⌥→")
+                SectionLabel("POSITION")
                 Picker("System", selection: $state.positionSystem) {
                     ForEach(PositionSystem.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 140)
+                .controlSize(.small)
+                .frame(width: 130)
             }
             HStack(spacing: 4) {
                 PillButton(title: "All", selected: state.scalePosition == 0) { state.scalePosition = 0 }
@@ -298,12 +395,13 @@ struct PositionSelector: View {
                     }
                 } else {
                     ForEach(Array(state.scaleCAGEDShapes.enumerated()), id: \.offset) { i, s in
-                        PillButton(title: s.shape.rawValue, selected: state.scalePosition == i + 1, minWidth: 34) {
+                        PillButton(title: s.shape.rawValue, selected: state.scalePosition == i + 1, minWidth: 32) {
                             state.scalePosition = i + 1
                         }
                     }
                 }
             }
+            .help("Previous / next position (⌥← ⌥→)")
             Text(caption)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -322,7 +420,7 @@ struct PositionSelector: View {
         case .caged:
             if state.scaleCAGEDShapes.isEmpty { return "CAGED needs a 6-string tuning in standard intervals" }
             if let s = state.selectedScaleShape {
-                return "\(s.shape.rawValue) shape · frets \(max(0, s.minFret - 1))–\(s.maxFret + 1) · ringed notes = chord shape"
+                return "\(s.shape.rawValue) shape · frets \(max(0, s.minFret - 1))–\(s.maxFret + 1)"
             }
             return "Whole neck"
         }
@@ -333,10 +431,11 @@ struct HarmonyRow: View {
     @EnvironmentObject var state: AppState
 
     var body: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 6) {
             ForEach(state.harmonized) { h in
-                ChordChip(top: h.numeral, bottom: h.name, selected: false) { state.select(h) }
+                Tile(top: h.numeral, bottom: h.name, minWidth: 54) { state.select(h) }
                     .disabled(h.chord == nil)
+                    .help("Open \(h.name) in Chord mode")
             }
         }
     }
@@ -349,28 +448,12 @@ struct ProgressionVoicingInfo: View {
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 8) {
-            SectionLabel("CHORD  ·  ⌥← ⌥→")
+            SectionLabel("CHORD")
             if let step = state.currentStep {
-                HStack(spacing: 10) {
-                    Button { state.step(-1) } label: { Image(systemName: "chevron.left").frame(width: 14) }
-                    VStack(spacing: 2) {
-                        Text("\(step.id + 1) / \(state.progression.count)")
-                            .font(.system(size: 15, weight: .bold, design: .rounded))
-                            .monospacedDigit()
-                        if let v = state.displayedVoicing {
-                            Text(v.shorthand)
-                                .font(.system(size: 13, weight: .medium, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text(step.chord.name)
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(minWidth: 120)
-                    Button { state.step(1) } label: { Image(systemName: "chevron.right").frame(width: 14) }
-                }
-                .buttonStyle(.bordered)
+                Stepper3(title: "\(step.id + 1) of \(state.progression.count)",
+                         subtitle: state.displayedVoicing?.shorthand ?? step.chord.name,
+                         back: { state.step(-1) }, forward: { state.step(1) })
+                    .help("Previous / next chord (⌥← ⌥→)")
             } else {
                 Text("No chords yet")
                     .font(.callout)
@@ -386,10 +469,10 @@ struct ProgressionPanel: View {
     var body: some View {
         let steps = state.progression
         let current = state.currentStep?.id ?? -1
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    SectionLabel("PROGRESSION IN \(state.rootName.text.uppercased())  ·  CLICK A CHORD  ·  SPACE PLAYS")
+                    SectionLabel("PROGRESSION IN \(state.rootName.text.uppercased())")
                     Spacer()
                     Button("Remove Last") { state.removeLastFromProgression() }
                         .disabled(steps.isEmpty)
@@ -398,17 +481,17 @@ struct ProgressionPanel: View {
                 }
                 .controlSize(.small)
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 7) {
+                    HStack(spacing: 6) {
                         ForEach(steps) { step in
-                            ChordChip(top: state.displayToken(step.token), bottom: step.name,
-                                      selected: step.id == current) {
+                            Tile(top: state.displayToken(step.token), bottom: step.name,
+                                 selected: step.id == current, minWidth: 54) {
                                 state.progressionStep = step.id
                             }
                         }
                     }
                 }
                 if steps.isEmpty {
-                    Text("Empty. Load a preset, type numerals in the sidebar, or add chords below.")
+                    Text("Load a preset or type Roman numerals in the sidebar, or add chords below.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -418,17 +501,18 @@ struct ProgressionPanel: View {
             if !diatonic.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 12) {
-                        SectionLabel("ADD CHORD FROM \(state.rootName.text.uppercased()) \(state.scale.name.uppercased())")
-                        Toggle("7ths", isOn: $state.harmonySevenths)
+                        SectionLabel("ADD FROM \(state.rootName.text.uppercased()) \(state.scale.name.uppercased())")
+                        Toggle("Sevenths", isOn: $state.harmonySevenths)
                             .toggleStyle(.switch)
                             .controlSize(.mini)
                     }
-                    HStack(spacing: 7) {
+                    HStack(spacing: 6) {
                         ForEach(diatonic) { h in
-                            ChordChip(top: h.numeral, bottom: h.name, selected: false) {
+                            Tile(top: h.numeral, bottom: h.name, minWidth: 54) {
                                 if let t = h.token { state.appendToProgression(t) }
                             }
                             .disabled(h.token == nil)
+                            .help("Append \(h.name) to the progression")
                         }
                     }
                 }
@@ -444,16 +528,8 @@ struct SidebarView: View {
 
     var body: some View {
         Form {
-            Section {
-                Picker("Mode", selection: $state.mode) {
-                    ForEach(ViewMode.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-            }
-
             Section("Key") {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 6), spacing: 6) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: 6), spacing: 5) {
                     ForEach(0..<12, id: \.self) { pc in
                         KeyButton(pc: pc)
                     }
@@ -475,8 +551,10 @@ struct SidebarView: View {
                 Picker("Labels", selection: $state.labelMode) {
                     ForEach(LabelMode.allCases) { Text($0.rawValue).tag($0) }
                 }
-                Toggle("Color by interval", isOn: $state.colorByInterval)
-                Toggle("Dim notes outside position / voicing", isOn: $state.showGhostNotes)
+                Picker("Colors", selection: $state.colorMode) {
+                    ForEach(ColorMode.allCases) { Text($0.rawValue).tag($0) }
+                }
+                Toggle("Dim notes outside selection", isOn: $state.showGhostNotes)
                 Toggle("Show all chromatic notes", isOn: $state.showChromatic)
                 Toggle("Left-handed", isOn: $state.leftHanded)
             }
@@ -514,18 +592,14 @@ struct SidebarView: View {
         Picker("Strings", selection: $state.voicingStrings) {
             Text("Any (4+)").tag(0)
             ForEach(Array(2...max(state.tuning.notes.count, 2)), id: \.self) { n in
-                Text("\(n) strings").tag(n)
+                Text("\(n)").tag(n)
             }
         }
     }
 
     @ViewBuilder private var scaleSection: some View {
-        Section("Scale / Mode") {
+        Section("Scale") {
             scalePicker
-            LabeledContent("Formula") {
-                Text(state.scale.formula)
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-            }
         }
     }
 
@@ -540,51 +614,47 @@ struct SidebarView: View {
                     }
                 }
             }
-            Picker("Show", selection: $state.chordDisplay) {
+            Picker("View", selection: $state.chordDisplay) {
                 ForEach(ChordDisplay.allCases) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
             Picker("Inversion", selection: $state.inversion) {
                 ForEach(0..<state.chord.intervals.count, id: \.self) { i in
                     let bass = state.rootName.adding(state.chord.intervals[i]).text
-                    Text("\(state.inversionName(i))  (bass \(bass))").tag(i)
+                    Text("\(state.inversionName(i)) (\(bass))").tag(i)
                 }
             }
             .disabled(state.chordDisplay == .caged)
             if state.chordDisplay == .voicings {
                 stringsPicker
             }
-            LabeledContent("Formula") {
-                Text(state.chord.formula)
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-            }
         }
     }
 
     @ViewBuilder private var progressionSections: some View {
         Section("Progression") {
-            Menu("Load Preset…") {
+            Menu("Load Preset") {
                 ForEach(ProgressionLibrary.presets) { p in
                     Button(p.name) { state.progressionText = p.text }
                 }
             }
             TextField("Roman numerals", text: $state.progressionText, axis: .vertical)
-                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                .font(.system(size: 13, design: .monospaced))
                 .lineLimit(2...5)
             let invalid = state.parsedProgression.invalid
             if !invalid.isEmpty {
-                Text("Not understood: \(invalid.joined(separator: "  "))")
+                Text("Not recognised: \(invalid.joined(separator: "  "))")
                     .font(.caption)
                     .foregroundStyle(.red)
             }
-            Text("I ii iii IV V vi vii°, then 7 · maj7 · ø7 · °7 · 9 · sus4 · 7b9 …  Prefix b or # for borrowed chords (bVII, #iv°).")
+            Text("I ii iii IV V vi vii°, with 7, maj7, ø7, °7, 9, sus4, 7b9 … Prefix b or # for borrowed chords (bVII, #iv°).")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             scalePicker
         }
-        Section("Fretboard") {
-            Picker("Show", selection: $state.progressionDisplay) {
+        Section("Voicings") {
+            Picker("View", selection: $state.progressionDisplay) {
                 ForEach(ProgressionDisplay.allCases) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
@@ -592,16 +662,17 @@ struct SidebarView: View {
                 stringsPicker
                 Stepper("Around fret \(state.progressionFret)", value: $state.progressionFret,
                         in: 0...max(0, state.fretCount - 4))
-                Toggle("Use inversions for voice leading", isOn: $state.allowInversions)
+                Toggle("Use inversions", isOn: $state.allowInversions)
             }
         }
         Section("Playback") {
             LabeledContent("Tempo") {
                 HStack {
                     Slider(value: $state.tempo, in: 40...220, step: 1)
-                    Text("\(Int(state.tempo))")
+                    Text("\(Int(state.tempo)) bpm")
                         .monospacedDigit()
-                        .frame(width: 30, alignment: .trailing)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 58, alignment: .trailing)
                 }
             }
             Picker("Beats per chord", selection: $state.beatsPerChord) {
@@ -618,16 +689,16 @@ struct KeyButton: View {
 
     var body: some View {
         let selected = state.rootPC == pc
-        let isBlack = [1, 3, 6, 8, 10].contains(pc)
         Button {
             state.rootPC = pc
         } label: {
             Text(state.keyName(pc).text)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .frame(maxWidth: .infinity, minHeight: 28)
-                .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(selected ? Color.accentColor
-                                   : (isBlack ? Color.black.opacity(0.35) : Color.white.opacity(0.08))))
+                .font(.system(size: 12.5, weight: selected ? .semibold : .regular))
+                .frame(maxWidth: .infinity, minHeight: 26)
+                .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(selected ? Color.accentColor : surface))
+                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(selected ? Color.clear : hairline))
                 .foregroundStyle(selected ? Color.white : Color.primary)
                 .contentShape(Rectangle())
         }

@@ -151,23 +151,22 @@ fragment float4 fmain(VOut in [[stage_in]],
         }
         return premul(c, a * in.color.a);
     }
-    case 3: { // ---------- note marker (glossy disc + optional glow)
+    case 3: { // ---------- note marker (flat disc, fine rim, optional glow for playback)
         float r = b.x;
         float d = length(p) - r;
         float a = 1.0 - smoothstep(-aa, aa, d);
         float2 lp = p / r;
-        float l = clamp(1.15 - length(lp - float2(-0.35, -0.45)) * 0.75, 0.0, 1.0);
-        float3 c = mix(in.color2.rgb, in.color.rgb, l);
-        float rim = smoothstep(-r * 0.18, 0.0, d);
-        c = mix(c, in.color2.rgb * 0.7, rim * 0.55);
-        float gl = 1.0 - smoothstep(0.0, 0.45, length((lp - float2(0.0, -0.5)) * float2(0.8, 1.6)));
-        c += gl * 0.22;
+        float3 c = in.color.rgb * (1.0 - 0.09 * lp.y);
+        float sheen = 1.0 - smoothstep(0.0, 0.9, length((lp - float2(0.0, -0.6)) * float2(0.9, 1.9)));
+        c += sheen * 0.06;
+        float rim = smoothstep(-1.4, -0.1, d);
+        c = mix(c, in.color2.rgb, rim * 0.85);
         float alpha = in.color.a;
         float4 body = premul(c, a * alpha);
         float glowAmt = in.params.w;
         if (glowAmt > 0.0) {
             float gd = max(d, 0.0);
-            float glow = exp(-gd / max(r * 0.35, 1.0)) * glowAmt * (1.0 - a) * 0.8;
+            float glow = exp(-gd / max(r * 0.3, 1.0)) * glowAmt * (1.0 - a) * 0.7;
             float4 gcol = premul(in.color.rgb, clamp(glow, 0.0, 1.0) * alpha);
             body = body + gcol * (1.0 - body.a);
         }

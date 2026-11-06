@@ -32,6 +32,11 @@ enum ProgressionDisplay: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum ColorMode: String, CaseIterable, Identifiable {
+    case function = "Chord Tones", spectrum = "Spectrum", rootOnly = "Root Only"
+    var id: String { rawValue }
+}
+
 enum WoodStyle: String, CaseIterable, Identifiable {
     case rosewood = "Rosewood", ebony = "Ebony", maple = "Maple"
     var id: String { rawValue }
@@ -120,7 +125,7 @@ final class AppState: ObservableObject {
 
     // Display
     @Published var labelMode: LabelMode = .notes
-    @Published var colorByInterval = true
+    @Published var colorMode: ColorMode = .function
     @Published var showGhostNotes = true
     @Published var showChromatic = false
     @Published var leftHanded = false

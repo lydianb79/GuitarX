@@ -33,19 +33,28 @@ struct FretboardLayout {
         boardRight = right
         lastFretX = right - 10
 
-        let topMargin: Float = 26
-        let bottomMargin: Float = 44
+        let topMargin: Float = FretboardLayout.topMargin
+        let bottomMargin: Float = FretboardLayout.bottomMargin
         let availH = max(height - topMargin - bottomMargin, 60)
         let n = Float(s)
-        let sp = min(availH / (n - 1 + 1.2), 50)
+        let sp = min(availH / (n - 1 + 1.2), FretboardLayout.maxSpacing)
         spacing = sp
         edgePad = sp * 0.6
         let boardH = sp * (n - 1) + sp * 1.2
-        boardTop = topMargin + (availH - boardH) * 0.5
+        boardTop = topMargin + max(0, availH - boardH) * 0.5
         boardBottom = boardTop + boardH
 
         let narrow = (right - 10 - 92) * (FretboardLayout.norm(f, f) - FretboardLayout.norm(f - 1, f))
-        markerRadius = max(6, min(sp * 0.40, narrow * 0.44, 17))
+        markerRadius = max(6, min(sp * 0.38, narrow * 0.44, 16))
+    }
+
+    static let topMargin: Float = 14
+    static let bottomMargin: Float = 36
+    static let maxSpacing: Float = 46
+
+    /// View height at which the board uses its full string spacing.
+    static func idealHeight(strings: Int) -> CGFloat {
+        CGFloat(topMargin + bottomMargin + maxSpacing * (Float(max(strings, 1)) - 1 + 1.2))
     }
 
     /// Blend of real (equal-tempered) fret spacing and linear spacing, so high frets stay usable.
@@ -87,27 +96,53 @@ struct FretboardLayout {
 // MARK: - Colors
 
 enum Palette {
-    /// index 0 = neutral, 1...7 = interval degree colours
-    static let degreeColors: [SIMD3<Float>] = [
-        SIMD3(0.93, 0.91, 0.86),
-        SIMD3(1.00, 0.42, 0.35),   // 1  coral
-        SIMD3(0.40, 0.71, 1.00),   // 2  sky
-        SIMD3(1.00, 0.80, 0.32),   // 3  gold
-        SIMD3(0.47, 0.87, 0.56),   // 4  green
-        SIMD3(0.32, 0.83, 0.80),   // 5  teal
-        SIMD3(1.00, 0.56, 0.79),   // 6  pink
-        SIMD3(0.71, 0.60, 1.00),   // 7  violet
+    static let root = SIMD3<Float>(0.91, 0.33, 0.25)        // vermilion
+    static let neutral = SIMD3<Float>(0.80, 0.80, 0.78)     // warm light grey
+
+    /// Function scheme: only root, 3rd, 5th and 7th carry colour.
+    static let function: [Int: SIMD3<Float>] = [
+        3: SIMD3(0.95, 0.73, 0.27),     // amber
+        5: SIMD3(0.27, 0.60, 0.92),     // blue
+        7: SIMD3(0.60, 0.45, 0.90),     // violet
     ]
 
-    static func rgb(degree: Int, isRoot: Bool, colorful: Bool) -> SIMD3<Float> {
-        if isRoot { return degreeColors[1] }
-        if !colorful { return degreeColors[0] }
-        return degreeColors[max(0, min(7, degree))]
+    /// Spectrum scheme: one restrained hue per degree.
+    static let spectrum: [SIMD3<Float>] = [
+        neutral,
+        root,
+        SIMD3(0.90, 0.54, 0.24),    // 2
+        SIMD3(0.95, 0.75, 0.28),    // 3
+        SIMD3(0.42, 0.74, 0.43),    // 4
+        SIMD3(0.27, 0.64, 0.86),    // 5
+        SIMD3(0.40, 0.48, 0.90),    // 6
+        SIMD3(0.65, 0.45, 0.88),    // 7
+    ]
+
+    static func rgb(degree: Int, isRoot: Bool, mode: ColorMode) -> SIMD3<Float> {
+        if isRoot { return root }
+        switch mode {
+        case .function: return function[degree] ?? neutral
+        case .spectrum: return spectrum[max(0, min(7, degree))]
+        case .rootOnly: return neutral
+        }
     }
 
-    static func color(degree: Int, isRoot: Bool, colorful: Bool) -> Color {
-        let c = rgb(degree: degree, isRoot: isRoot, colorful: colorful)
-        return Color(red: Double(c.x), green: Double(c.y), blue: Double(c.z))
+    /// Dark text on light fills, white on saturated/dark ones.
+    static func textRGB(on c: SIMD3<Float>) -> SIMD3<Float> {
+        let lum = 0.2126 * c.x + 0.7152 * c.y + 0.0722 * c.z
+        return lum > 0.55 ? SIMD3(0.09, 0.09, 0.10) : SIMD3(1, 1, 1)
+    }
+
+    static func color(_ c: SIMD3<Float>) -> Color {
+        Color(red: Double(c.x), green: Double(c.y), blue: Double(c.z))
+    }
+
+    static func color(degree: Int, isRoot: Bool, mode: ColorMode) -> Color {
+        color(rgb(degree: degree, isRoot: isRoot, mode: mode))
+    }
+
+    static func textColor(degree: Int, isRoot: Bool, mode: ColorMode) -> Color {
+        color(textRGB(on: rgb(degree: degree, isRoot: isRoot, mode: mode)))
     }
 }
 
@@ -116,6 +151,7 @@ struct WoodTheme {
     let wood2: SIMD4<Float>
     let inlay1: SIMD4<Float>
     let inlay2: SIMD4<Float>
+    var binding: SIMD4<Float> = [0.86, 0.83, 0.74, 0.55]
 
     static func of(_ style: WoodStyle) -> WoodTheme {
         switch style {
@@ -127,7 +163,8 @@ struct WoodTheme {
                              inlay1: [0.95, 0.94, 0.90, 1], inlay2: [0.80, 0.88, 0.95, 1])
         case .maple:
             return WoodTheme(wood1: [0.78, 0.60, 0.38, 1], wood2: [0.93, 0.78, 0.56, 1],
-                             inlay1: [0.10, 0.09, 0.08, 1], inlay2: [0.22, 0.19, 0.17, 1])
+                             inlay1: [0.10, 0.09, 0.08, 1], inlay2: [0.22, 0.19, 0.17, 1],
+                             binding: [0.30, 0.22, 0.14, 0.6])
         }
     }
 }
