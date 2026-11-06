@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 let appBackground = Color(red: 0.094, green: 0.094, blue: 0.104)
 let surface = Color.white.opacity(0.045)
@@ -276,7 +277,12 @@ struct InfoPanel: View {
             }
             if state.mode == .scale && !state.harmonized.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    SectionLabel("DIATONIC SEVENTH CHORDS")
+                    HStack(spacing: 12) {
+                        SectionLabel("DIATONIC CHORDS  ·  CLICK OR PRESS 1–7 TO PLAY")
+                        Toggle("Sevenths", isOn: $state.harmonySevenths)
+                            .toggleStyle(.switch)
+                            .controlSize(.mini)
+                    }
                     HarmonyRow()
                 }
             }
@@ -448,9 +454,15 @@ struct HarmonyRow: View {
     var body: some View {
         HStack(spacing: 6) {
             ForEach(state.harmonized) { h in
-                Tile(top: h.numeral, bottom: h.name, minWidth: 54) { state.select(h) }
-                    .disabled(h.chord == nil)
-                    .help("Open \(h.name) in Chord mode")
+                Tile(top: h.numeral, bottom: h.name, minWidth: 54) {
+                    if NSEvent.modifierFlags.contains(.command) { state.select(h) } else { state.playHarmony(h) }
+                }
+                .disabled(h.chord == nil)
+                .help("Click to hear \(h.name) · ⌘-click to open it in Chord mode")
+                .contextMenu {
+                    Button("Play \(h.name)") { state.playHarmony(h) }
+                    Button("Open in Chord Mode") { state.select(h) }
+                }
             }
         }
     }
@@ -500,8 +512,9 @@ struct ProgressionPanel: View {
                         ForEach(steps) { step in
                             Tile(top: state.displayToken(step.token), bottom: step.name,
                                  selected: step.id == current, minWidth: 54) {
-                                state.progressionStep = step.id
+                                state.playStep(step.id)
                             }
+                            .help("Click to hear \(step.name)")
                         }
                     }
                 }
@@ -516,7 +529,7 @@ struct ProgressionPanel: View {
             if !diatonic.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 12) {
-                        SectionLabel("ADD FROM \(state.rootName.text.uppercased()) \(state.scale.name.uppercased())")
+                        SectionLabel("ADD FROM \(state.rootName.text.uppercased()) \(state.scale.name.uppercased())  ·  ⇧1–7")
                         Toggle("Sevenths", isOn: $state.harmonySevenths)
                             .toggleStyle(.switch)
                             .controlSize(.mini)
@@ -525,9 +538,10 @@ struct ProgressionPanel: View {
                         ForEach(diatonic) { h in
                             Tile(top: h.numeral, bottom: h.name, minWidth: 54) {
                                 if let t = h.token { state.appendToProgression(t) }
+                                state.playHarmony(h)
                             }
                             .disabled(h.token == nil)
-                            .help("Append \(h.name) to the progression")
+                            .help("Append \(h.name) to the progression (⇧\(h.id + 1))")
                         }
                     }
                 }
@@ -589,6 +603,9 @@ struct SidebarView: View {
             Section("Sound") {
                 Picker("Instrument", selection: $state.tone) {
                     ForEach(GuitarTone.allCases) { Text($0.rawValue).tag($0) }
+                }
+                Picker("Chord style", selection: $state.playStyle) {
+                    ForEach(PlayStyle.allCases) { Text($0.rawValue).tag($0) }
                 }
                 if state.tone != .synth && state.tuning.id.hasPrefix("Bass") {
                     Text("Bass tunings use the fingered bass sample.")

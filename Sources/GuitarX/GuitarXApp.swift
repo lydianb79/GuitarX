@@ -51,6 +51,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if NSApp.keyWindow?.firstResponder is NSTextView { return false }
         let mods = event.modifierFlags.intersection([.command, .option, .shift, .control])
         let none: NSEvent.ModifierFlags = []
+        // Number row 1–7: play diatonic chords (⇧ appends in Progression mode).
+        let digitKeys: [UInt16: Int] = [18: 1, 19: 2, 20: 3, 21: 4, 23: 5, 22: 6, 26: 7]
+        if let degree = digitKeys[event.keyCode], mods == none || mods == .shift {
+            state.diatonicKey(degree, append: mods == .shift)
+            return true
+        }
         switch event.keyCode {
         case 49 where mods == none:                 // Space
             state.playSelection()

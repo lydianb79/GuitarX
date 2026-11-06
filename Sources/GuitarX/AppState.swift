@@ -37,6 +37,11 @@ enum ColorMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum PlayStyle: String, CaseIterable, Identifiable {
+    case strumDown = "Strum Down", strumUp = "Strum Up", arpeggio = "Arpeggio", block = "Block"
+    var id: String { rawValue }
+}
+
 enum WoodStyle: String, CaseIterable, Identifiable {
     case rosewood = "Rosewood", ebony = "Ebony", maple = "Maple"
     var id: String { rawValue }
@@ -136,6 +141,7 @@ final class AppState: ObservableObject {
     }
     @Published var fretCount: Int = 22 { didSet { voicingIndex = 0 } }
     @Published var wood: WoodStyle = .ebony
+    @Published var playStyle: PlayStyle = .strumDown
     @Published var tone: GuitarTone = .steel { didSet { synth.preload(program: soundProgram) } }
 
     /// GM program actually used: bass tunings get the bass sample, nil = synth.
@@ -537,7 +543,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    var harmonized: [HarmonyChord] { mode == .scale ? harmonize(sevenths: true) : [] }
+    var harmonized: [HarmonyChord] { mode == .scale ? harmonize(sevenths: harmonySevenths) : [] }
 
     // MARK: - Display context & fretboard model
 
@@ -762,16 +768,8 @@ final class AppState: ObservableObject {
         }
         var events: [NoteEvent] = []
         if mode == .chord {
-            if let v = displayedVoicing {
-                for (i, p) in strum(v).enumerated() {
-                    events.append(NoteEvent(pos: p.pos, midi: p.midi, time: Double(i) * 0.045))
-                }
-            } else {
-                let inv = chordDisplay == .allTones ? inversion : 0
-                for (i, m) in closePosition(rootPC: rootPC, chord: chord, inversion: inv).enumerated() {
-                    events.append(NoteEvent(pos: nil, midi: m, time: Double(i) * 0.05))
-                }
-            }
+            let inv = chordDisplay == .allTones ? inversion : 0
+            events = chordNotes(displayedVoicing, rootPC: rootPC, chord: chord, inversion: inv, duration: 3.0)
         } else {
             for (i, n) in scaleRun().enumerated() {
                 events.append(NoteEvent(pos: n.pos, midi: n.midi, time: Double(i) * 0.2, length: 0.6))
@@ -779,6 +777,85 @@ final class AppState: ObservableObject {
         }
         guard !events.isEmpty else { return }
         trigger(events)
+    }
+
+    // MARK: Chord playback
+
+    /// Note events for one chord in the current play style. Uses the grip if given,
+    /// otherwise a close-position voicing from the inversion's bass note.
+    func chordNotes(_ voicing: Voicing?, rootPC: Int, chord: ChordType, inversion: Int,
+                    duration: Double) -> [NoteEvent] {
+        var tones: [(pos: FretPos?, midi: Int)] = []
+        if let v = voicing {
+            for p in strum(v) { tones.append((pos: p.pos, midi: p.midi)) }
+        } else {
+            for m in closePosition(rootPC: rootPC, chord: chord, inversion: inversion) {
+                tones.append((pos: nil, midi: m))
+            }
+        }
+        guard !tones.isEmpty else { return [] }
+
+        let spacing: Double
+        switch playStyle {
+        case .strumDown: spacing = 0.035
+        case .strumUp: tones.reverse(); spacing = 0.028
+        case .arpeggio: spacing = min(0.18, max(0.06, duration * 0.75 / Double(tones.count)))
+        case .block: spacing = 0.004
+        }
+        return tones.enumerated().map { i, t in
+            let start = Double(i) * spacing
+            return NoteEvent(pos: t.pos, midi: t.midi, time: start, length: max(0.3, duration - start))
+        }
+    }
+
+    /// A playable root-position grip for any chord, near a fret.
+    func bestVoicing(rootPC: Int, chord: ChordType, near fret: Int) -> Voicing? {
+        let options = VoicingGenerator.generate(tuning: tuning.notes, rootPC: rootPC, chord: chord,
+                                                inversion: 0, strings: 0, fretCount: fretCount, limit: 250)
+        let target = Double(fret) + 1.5
+        func score(_ v: Voicing) -> Double {
+            let fretted = v.frets.compactMap { $0 }.filter { $0 > 0 }
+            let center = fretted.isEmpty ? 0.5 : Double(fretted.reduce(0, +)) / Double(fretted.count)
+            return abs(center - target) - 0.25 * Double(v.frets.compactMap { $0 }.count)
+        }
+        return options.min { score($0) < score($1) }
+    }
+
+    /// Fret area the user is currently looking at (selected position / voicing), for choosing grips.
+    private var focusFret: Int {
+        let ctx = displayContext
+        if let w = ctx.window { return w.lowerBound }
+        if let a = ctx.allowed, let lo = a.map(\.fret).min() { return lo }
+        if let v = ctx.voicing { return v.minFret }
+        return mode == .progression ? progressionFret : 0
+    }
+
+    /// Plays a chord built on a scale degree (diatonic tiles, keys 1–7).
+    func playHarmony(_ h: HarmonyChord) {
+        guard let c = h.chord else { return }
+        let v = bestVoicing(rootPC: h.root.pitchClass, chord: c, near: focusFret)
+        trigger(chordNotes(v, rootPC: h.root.pitchClass, chord: c, inversion: 0, duration: 2.5))
+    }
+
+    /// Keys 1–7: play (or with Shift in Progression mode, append) the diatonic chord on that degree.
+    func diatonicKey(_ degree: Int, append: Bool) {
+        let chords = harmonize(sevenths: harmonySevenths)
+        guard degree >= 1, degree <= chords.count else { return }
+        let h = chords[degree - 1]
+        if append && mode == .progression, let t = h.token { appendToProgression(t) }
+        playHarmony(h)
+    }
+
+    /// Selects and plays one chord of the progression.
+    func playStep(_ index: Int) {
+        let steps = progression
+        guard index >= 0, index < steps.count else { return }
+        if isPlaying { stopPlayback() }
+        progressionStep = index
+        let step = steps[index]
+        let vs = progressionVoicings
+        let v: Voicing? = (progressionDisplay == .voicings && index < vs.count) ? vs[index] : nil
+        trigger(chordNotes(v, rootPC: step.rootPC, chord: step.chord, inversion: 0, duration: 2.5))
     }
 
     private func strum(_ v: Voicing) -> [(pos: FretPos, midi: Int)] {
@@ -855,17 +932,10 @@ final class AppState: ObservableObject {
         var stepNotes: [[NoteEvent]] = []
         for (i, step) in steps.enumerated() {
             let t0 = Double(i) * chordDur
-            var evs: [NoteEvent] = []
-            if useVoicings, i < vs.count, let v = vs[i] {
-                for (k, p) in strum(v).enumerated() {
-                    evs.append(NoteEvent(pos: p.pos, midi: p.midi, time: Double(k) * 0.03))
-                }
-            } else {
-                for (k, m) in closePosition(rootPC: step.rootPC, chord: step.chord, inversion: 0).enumerated() {
-                    evs.append(NoteEvent(pos: nil, midi: m, time: Double(k) * 0.03))
-                }
-            }
-            for e in evs { notes.append(SynthNote(midi: e.midi, time: t0 + e.time, length: chordDur + 0.35)) }
+            let voicing: Voicing? = (useVoicings && i < vs.count) ? vs[i] : nil
+            let evs = chordNotes(voicing, rootPC: step.rootPC, chord: step.chord, inversion: 0,
+                                 duration: chordDur + 0.35)
+            for e in evs { notes.append(SynthNote(midi: e.midi, time: t0 + e.time, length: e.length)) }
             stepNotes.append(evs)
         }
 
