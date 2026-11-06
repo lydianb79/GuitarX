@@ -82,6 +82,74 @@ final class FretboardRenderer: NSObject, MTKViewDelegate {
 
     func hitTest(x: Float, y: Float) -> FretPos? { layout?.hitTest(x: x, y: y) }
 
+    /// Renders the current state off-screen (no animation, hover or pulses) for export.
+    func renderImage(width: Int, height: Int, scale: Int = 3) -> CGImage? {
+        guard let state = state, width > 0, height > 0 else { return nil }
+        let pw = width * scale
+        let ph = height * scale
+        let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: pw, height: ph, mipmapped: false)
+        desc.usage = [.renderTarget, .shaderRead]
+        desc.storageMode = .managed
+        guard let target = device.makeTexture(descriptor: desc),
+              let cmd = queue.makeCommandBuffer() else { return nil }
+
+        let savedMarkers = markers
+        let savedWidth = mirrorWidth
+        let savedMirror = mirrorOn
+        markers = state.computeMarkers()
+        let L = FretboardLayout(width: Float(width), height: Float(height),
+                                strings: state.tuning.notes.count, frets: state.fretCount,
+                                leftHanded: state.leftHanded)
+        mirrorWidth = L.width
+        mirrorOn = L.leftHanded
+        instances.removeAll(keepingCapacity: true)
+        buildScene(L, state: state, now: CACurrentMediaTime(), dt: 0, export: true)
+        markers = savedMarkers
+        mirrorWidth = savedWidth
+        mirrorOn = savedMirror
+        dirty = true
+
+        let rpd = MTLRenderPassDescriptor()
+        rpd.colorAttachments[0].texture = target
+        rpd.colorAttachments[0].loadAction = .clear
+        rpd.colorAttachments[0].storeAction = .store
+        rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0.055, green: 0.055, blue: 0.065, alpha: 1)
+        guard let enc = cmd.makeRenderCommandEncoder(descriptor: rpd) else { return nil }
+        let byteCount = MemoryLayout<GPUInstance>.stride * instances.count
+        if byteCount > 0,
+           let buffer = instances.withUnsafeBytes({ raw in
+               device.makeBuffer(bytes: raw.baseAddress!, length: byteCount, options: .storageModeShared)
+           }) {
+            var u = GPUUniforms(viewport: SIMD2<Float>(L.width, L.height), time: 0, scale: Float(scale))
+            enc.setRenderPipelineState(pipeline)
+            enc.setVertexBuffer(buffer, offset: 0, index: 0)
+            enc.setVertexBytes(&u, length: MemoryLayout<GPUUniforms>.stride, index: 1)
+            enc.setFragmentBytes(&u, length: MemoryLayout<GPUUniforms>.stride, index: 1)
+            enc.setFragmentTexture(atlas.texture, index: 0)
+            enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: instances.count)
+        }
+        enc.endEncoding()
+        if let blit = cmd.makeBlitCommandEncoder() {
+            blit.synchronize(resource: target)
+            blit.endEncoding()
+        }
+        cmd.commit()
+        cmd.waitUntilCompleted()
+
+        let bytesPerRow = pw * 4
+        var pixels = [UInt8](repeating: 0, count: bytesPerRow * ph)
+        pixels.withUnsafeMutableBytes { raw in
+            target.getBytes(raw.baseAddress!, bytesPerRow: bytesPerRow,
+                            from: MTLRegionMake2D(0, 0, pw, ph), mipmapLevel: 0)
+        }
+        guard let provider = CGDataProvider(data: Data(pixels) as CFData) else { return nil }
+        let info = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+        return CGImage(width: pw, height: ph, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: bytesPerRow,
+                       space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+                       bitmapInfo: info, provider: provider, decode: nil, shouldInterpolate: true,
+                       intent: .defaultIntent)
+    }
+
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
     func draw(in view: MTKView) {
@@ -108,7 +176,7 @@ final class FretboardRenderer: NSObject, MTKViewDelegate {
         mirrorOn = L.leftHanded
 
         instances.removeAll(keepingCapacity: true)
-        buildScene(L, state: state, now: now, dt: dt)
+        buildScene(L, state: state, now: now, dt: dt, export: false)
 
         rpd.colorAttachments[0].loadAction = .clear
         guard let enc = cmd.makeRenderCommandEncoder(descriptor: rpd) else { return }
@@ -151,7 +219,7 @@ final class FretboardRenderer: NSObject, MTKViewDelegate {
         emit(.text, x: x, y: y, w: height * 2, h: height, c1: color, uv: uv)
     }
 
-    private func buildScene(_ L: FretboardLayout, state: AppState, now: Double, dt: Float) {
+    private func buildScene(_ L: FretboardLayout, state: AppState, now: Double, dt: Float, export: Bool) {
         let theme = WoodTheme.of(state.wood)
         let tuning = state.tuning
 
@@ -235,7 +303,7 @@ final class FretboardRenderer: NSObject, MTKViewDelegate {
         }
 
         // Markers
-        if !state.pulses.isEmpty {
+        if !export && !state.pulses.isEmpty {
             state.pulses = state.pulses.filter { now - $0.value < 2.0 }
         }
         var newAnim: [FretPos: MarkerAnim] = [:]
@@ -244,7 +312,8 @@ final class FretboardRenderer: NSObject, MTKViewDelegate {
 
         for m in orderedMarkers {
             let key = "\(m.label)|\(m.degree)|\(m.role)|\(m.isRoot)"
-            var a = anim[m.pos] ?? MarkerAnim(presence: 0, key: key)
+            var a = anim[m.pos] ?? MarkerAnim(presence: export ? 1 : 0, key: key)
+            if export { a.presence = 1 }
             if a.key != key {
                 a.presence = min(a.presence, 0.5)
                 a.key = key
@@ -278,7 +347,7 @@ final class FretboardRenderer: NSObject, MTKViewDelegate {
             }
             if m.pos.fret == 0 { r *= 0.92 }
 
-            if let t0 = state.pulses[m.pos] {
+            if !export, let t0 = state.pulses[m.pos] {
                 let el = Float(now - t0)
                 if el >= 0 && el < 0.7 {
                     let p = 1 - el / 0.7
@@ -312,10 +381,10 @@ final class FretboardRenderer: NSObject, MTKViewDelegate {
                 text(m.label, x: x, y: y + r * 0.03, height: r * 1.3, color: rgba(textRGB, alpha * (m.role == .ghost ? 0.8 : 1)))
             }
         }
-        anim = newAnim
+        if !export { anim = newAnim }
 
         // Hover ring
-        if let h = state.hover, h.string < L.strings, h.fret <= L.frets {
+        if !export, let h = state.hover, h.string < L.strings, h.fret <= L.frets {
             let x = L.noteX(h.fret)
             let y = L.stringY(h.string)
             let th: Float = 2

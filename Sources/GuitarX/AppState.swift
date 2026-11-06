@@ -130,6 +130,9 @@ final class AppState: ObservableObject {
     /// Fret position → time a "played" pulse starts (read by the renderer).
     var pulses: [FretPos: Double] = [:]
 
+    /// The Metal renderer, used for off-screen PDF export.
+    weak var renderer: FretboardRenderer?
+
     private var voicingKey = ""
     private var voicingCache: [Voicing] = []
     private var progressionKey = ""
@@ -514,6 +517,21 @@ final class AppState: ObservableObject {
         }
         let n = NoteName.from(pitchClass: midi, preferFlats: activeRootName.accidental < 0)
         return "\(n.text)\(octave)  ·  \(place)"
+    }
+
+    // MARK: - Export
+
+    var exportAllLabel: String {
+        switch mode {
+        case .scale: return positionSystem == .caged ? "All CAGED Positions" : "All Positions"
+        case .chord:
+            switch chordDisplay {
+            case .caged: return "All CAGED Shapes"
+            case .voicings: return "All Voicings"
+            case .allTones: return "All Inversions"
+            }
+        case .progression: return "All Chords"
+        }
     }
 
     // MARK: - Actions

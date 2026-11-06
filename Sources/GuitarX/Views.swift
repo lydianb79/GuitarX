@@ -46,6 +46,16 @@ struct HeaderView: View {
                     .padding(.vertical, 7)
                     .background(Capsule().fill(Color.white.opacity(0.07)))
             }
+            Menu {
+                Button("This View…") { PDFExporter.exportCurrentView(state: state) }
+                Button("\(state.exportAllLabel)…") { PDFExporter.exportAll(state: state) }
+            } label: {
+                Label("Export PDF", systemImage: "square.and.arrow.up")
+            }
+            .menuStyle(.button)
+            .controlSize(.large)
+            .fixedSize()
+            .help("Export as PDF (⌘E / ⇧⌘E)")
             Button {
                 state.playSelection()
             } label: {

@@ -17,6 +17,7 @@ struct FretboardView: NSViewRepresentable {
         if let renderer = FretboardRenderer(view: view, state: state) {
             view.renderer = renderer
             view.delegate = renderer
+            state.renderer = renderer
         }
         return view
     }

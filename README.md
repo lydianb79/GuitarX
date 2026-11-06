@@ -31,6 +31,10 @@ Or open `Package.swift` in Xcode and press ⌘R.
   - Each chord gets a voicing chosen for smooth voice leading near a fret you set, optionally using inversions. Slash chords are labelled.
   - Playback has tempo, beats per chord and loop settings, and the fretboard follows along as it plays.
 - **Navigation:** scale positions (whole neck or 5-fret boxes), diatonic 7th chords for any 7-note scale (click one to jump to it), and note chips you can click to hide or show each interval.
+- **PDF export:**
+  - *This View* (⌘E) saves one page with the title, the notes and their intervals, the grip, and a high-resolution Metal render of the fretboard.
+  - *All…* (⇧⌘E) saves a multi-page sheet with two diagrams per page: every scale position or CAGED shape, every CAGED chord shape, the first 30 voicings, every inversion, or every chord of the progression.
+  - Both options are in the File menu and the export button next to Play.
 - **Labels:** note names, intervals, scale degrees, or none. Colours follow interval function (root, 3rd, 5th, 7th, …).
 - **Instrument:** 16 tunings (standard, drop tunings, open tunings, DADGAD, 7- and 8-string, bass, ukulele), 12–24 frets, left-handed mode.
 - **Sound:** click any fret to hear the note, or press **Space** to play the scale run or strum the voicing (a built-in plucked-string synth).
@@ -45,6 +49,7 @@ Or open `Package.swift` in Xcode and press ⌘R.
 | ⌘↑ / ⌘↓ | Key up / down a fifth |
 | ⌥← / ⌥→ | Previous / next position, voicing, CAGED shape or progression chord |
 | ⇧⌘C | Switch to CAGED view |
+| ⌘E / ⇧⌘E | Export view / export all as PDF |
 | ⇧⌘I | Next inversion |
 | ⇧⌘N / ⇧⌘T | Show note names / intervals |
 
@@ -62,4 +67,5 @@ Or open `Package.swift` in Xcode and press ⌘R.
 | `LabelAtlas.swift` | CoreText → Metal glyph atlas |
 | `FretboardLayout.swift` | Geometry, hit-testing, colour palette |
 | `Views.swift` | SwiftUI sidebar, header and info panel |
+| `PDFExport.swift` | Off-screen render → PDF sheets |
 | `Audio.swift` | Karplus–Strong guitar synth |

@@ -16,6 +16,12 @@ struct GuitarXApp: App {
         .defaultSize(width: 1480, height: 860)
         .commands {
             NavigatorCommands(state: state)
+            CommandGroup(after: .saveItem) {
+                Button("Export View as PDF…") { PDFExporter.exportCurrentView(state: state) }
+                    .keyboardShortcut("e", modifiers: .command)
+                Button("Export \(state.exportAllLabel) as PDF…") { PDFExporter.exportAll(state: state) }
+                    .keyboardShortcut("e", modifiers: [.command, .shift])
+            }
         }
     }
 }
