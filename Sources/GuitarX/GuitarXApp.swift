@@ -21,6 +21,8 @@ struct GuitarXApp: App {
                     .keyboardShortcut("e", modifiers: .command)
                 Button("Export \(state.exportAllLabel) as PDF…") { PDFExporter.exportAll(state: state) }
                     .keyboardShortcut("e", modifiers: [.command, .shift])
+                Toggle("Print-Friendly PDF", isOn: Binding(get: { state.pdfPrintFriendly },
+                                                         set: { state.pdfPrintFriendly = $0 }))
             }
         }
     }

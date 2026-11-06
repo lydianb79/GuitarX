@@ -23,7 +23,7 @@ enum ChordDisplay: String, CaseIterable, Identifiable {
 }
 
 enum PositionSystem: String, CaseIterable, Identifiable {
-    case boxes = "Boxes", caged = "CAGED"
+    case boxes = "Boxes", caged = "CAGED", nps = "3NPS"
     var id: String { rawValue }
 }
 
@@ -61,6 +61,14 @@ struct HarmonyChord: Identifiable {
     let chord: ChordType?
     var name: String { root.text + (chord?.symbol ?? " ?") }
     var token: String? { chord.map { ProgressionParser.token(interval: interval, chord: $0) } }
+}
+
+/// A notes-per-string scale fingering (3 per string for 7+ note scales, 2 otherwise).
+struct NPSPattern {
+    let positions: Set<FretPos>
+    let startDegree: Int
+    var minFret: Int { positions.map(\.fret).min() ?? 0 }
+    var maxFret: Int { positions.map(\.fret).max() ?? 0 }
 }
 
 struct NoteEvent {
@@ -112,6 +120,9 @@ final class AppState: ObservableObject {
     @Published var beatsPerChord: Int = 4
     @Published var loopProgression = false
     @Published var isPlaying = false
+
+    // Export
+    @Published var pdfPrintFriendly = true
 
     // Instrument
     @Published var tuningID: String = TuningLibrary.all[0].id {
@@ -266,6 +277,55 @@ final class AppState: ObservableObject {
         guard mode == .scale, positionSystem == .caged, scalePosition > 0 else { return nil }
         let shapes = scaleCAGEDShapes
         return scalePosition <= shapes.count ? shapes[scalePosition - 1] : nil
+    }
+
+    var notesPerString: Int { Set(scale.intervals.map(\.pitchClass)).count >= 7 ? 3 : 2 }
+
+    /// One pattern per scale degree: walk the scale upward from that degree on the lowest
+    /// string, placing `notesPerString` consecutive notes on each string.
+    var npsPatterns: [NPSPattern] {
+        let notes = tuning.notes
+        let pcs = Set(scale.intervals.map { mod12(rootPC + $0.semitones) }).sorted()
+        guard !pcs.isEmpty, !notes.isEmpty else { return [] }
+        let nps = notesPerString
+        let degreeOf: [Int: Int] = Dictionary(scale.intervals.enumerated().map {
+            (mod12(rootPC + $0.element.semitones), $0.offset + 1)
+        }, uniquingKeysWith: { first, _ in first })
+        var out: [NPSPattern] = []
+        for start in 0..<pcs.count {
+            var k = start
+            var midi = notes[0] + mod12(pcs[start] - notes[0])
+            var cells: [(string: Int, midi: Int)] = []
+            for s in 0..<notes.count {
+                for _ in 0..<nps {
+                    cells.append((s, midi))
+                    k = (k + 1) % pcs.count
+                    let step = mod12(pcs[k] - midi)
+                    midi += step == 0 ? 12 : step
+                }
+            }
+            var frets = cells.map { $0.midi - notes[$0.string] }
+            if let lo = frets.min(), lo < 0 { frets = frets.map { $0 + 12 } }
+            if let hi = frets.max(), hi > fretCount, (frets.min() ?? 0) >= 12 { frets = frets.map { $0 - 12 } }
+            guard let lo = frets.min(), let hi = frets.max(), lo >= 0, hi <= fretCount else { continue }
+            let positions = Set(zip(cells, frets).map { FretPos(string: $0.0.string, fret: $0.1) })
+            out.append(NPSPattern(positions: positions, startDegree: degreeOf[pcs[start]] ?? start + 1))
+        }
+        return out.sorted { $0.minFret < $1.minFret }
+    }
+
+    var selectedNPSPattern: NPSPattern? {
+        guard mode == .scale, positionSystem == .nps, scalePosition > 0 else { return nil }
+        let p = npsPatterns
+        return scalePosition <= p.count ? p[scalePosition - 1] : nil
+    }
+
+    var positionCount: Int {
+        switch positionSystem {
+        case .boxes: return scalePositions.count
+        case .caged: return scaleCAGEDShapes.count
+        case .nps: return npsPatterns.count
+        }
     }
 
     /// The CAGED scale fingering around a chord shape: one position per pitch, within one hand position.
@@ -477,6 +537,8 @@ final class AppState: ObservableObject {
                         ctx.allowed = cagedScalePattern(s)
                         ctx.accent = Set(s.positions)
                     }
+                case .nps:
+                    if let p = selectedNPSPattern { ctx.allowed = p.positions }
                 }
             }
             return ctx
@@ -594,7 +656,12 @@ final class AppState: ObservableObject {
 
     var exportAllLabel: String {
         switch mode {
-        case .scale: return positionSystem == .caged ? "All CAGED Positions" : "All Positions"
+        case .scale:
+            switch positionSystem {
+            case .boxes: return "All Positions"
+            case .caged: return "All CAGED Positions"
+            case .nps: return "All \(notesPerString)NPS Positions"
+            }
         case .chord:
             switch chordDisplay {
             case .caged: return "All CAGED Shapes"
@@ -625,8 +692,7 @@ final class AppState: ObservableObject {
                 voicingIndex = wrap(voicingIndex + d, n)
             }
         case .scale:
-            let count = positionSystem == .boxes ? scalePositions.count : scaleCAGEDShapes.count
-            scalePosition = wrap(scalePosition + d, count + 1)
+            scalePosition = wrap(scalePosition + d, positionCount + 1)
         case .progression:
             let n = progression.count
             guard n > 0 else { return }

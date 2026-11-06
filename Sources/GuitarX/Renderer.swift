@@ -48,6 +48,8 @@ final class FretboardRenderer: NSObject, MTKViewDelegate {
     private var lastTime = CACurrentMediaTime()
     private var mirrorWidth: Float = 0
     private var mirrorOn = false
+    /// Print-friendly palette (white background, light board) — used for PDF export.
+    private var lightMode = false
 
     init?(view: MTKView, state: AppState) {
         guard let device = view.device ?? MTLCreateSystemDefaultDevice(),
@@ -83,7 +85,7 @@ final class FretboardRenderer: NSObject, MTKViewDelegate {
     func hitTest(x: Float, y: Float) -> FretPos? { layout?.hitTest(x: x, y: y) }
 
     /// Renders the current state off-screen (no animation, hover or pulses) for export.
-    func renderImage(width: Int, height: Int, scale: Int = 3) -> CGImage? {
+    func renderImage(width: Int, height: Int, scale: Int = 3, light: Bool = false) -> CGImage? {
         guard let state = state, width > 0, height > 0 else { return nil }
         let pw = width * scale
         let ph = height * scale
@@ -103,7 +105,9 @@ final class FretboardRenderer: NSObject, MTKViewDelegate {
         mirrorWidth = L.width
         mirrorOn = L.leftHanded
         instances.removeAll(keepingCapacity: true)
+        lightMode = light
         buildScene(L, state: state, now: CACurrentMediaTime(), dt: 0, export: true)
+        lightMode = false
         markers = savedMarkers
         mirrorWidth = savedWidth
         mirrorOn = savedMirror
@@ -113,7 +117,8 @@ final class FretboardRenderer: NSObject, MTKViewDelegate {
         rpd.colorAttachments[0].texture = target
         rpd.colorAttachments[0].loadAction = .clear
         rpd.colorAttachments[0].storeAction = .store
-        rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0.055, green: 0.055, blue: 0.065, alpha: 1)
+        rpd.colorAttachments[0].clearColor = light ? MTLClearColor(red: 1, green: 1, blue: 1, alpha: 1)
+                                                   : MTLClearColor(red: 0.055, green: 0.055, blue: 0.065, alpha: 1)
         guard let enc = cmd.makeRenderCommandEncoder(descriptor: rpd) else { return nil }
         let byteCount = MemoryLayout<GPUInstance>.stride * instances.count
         if byteCount > 0,
@@ -220,12 +225,18 @@ final class FretboardRenderer: NSObject, MTKViewDelegate {
     }
 
     private func buildScene(_ L: FretboardLayout, state: AppState, now: Double, dt: Float, export: Bool) {
+        let light = lightMode
         let theme = WoodTheme.of(state.wood)
         let tuning = state.tuning
 
         // Background
-        emit(.vignette, x: L.width / 2, y: L.height / 2, w: L.width, h: L.height,
-             c1: [0.105, 0.105, 0.115, 1], c2: [0.085, 0.085, 0.095, 1], mirror: false)
+        if light {
+            emit(.vignette, x: L.width / 2, y: L.height / 2, w: L.width, h: L.height,
+                 c1: [1, 1, 1, 1], c2: [1, 1, 1, 1], mirror: false)
+        } else {
+            emit(.vignette, x: L.width / 2, y: L.height / 2, w: L.width, h: L.height,
+                 c1: [0.105, 0.105, 0.115, 1], c2: [0.085, 0.085, 0.095, 1], mirror: false)
+        }
 
         let boardW = L.boardRight - L.nutX
         let cx = L.nutX + boardW / 2
@@ -233,11 +244,19 @@ final class FretboardRenderer: NSObject, MTKViewDelegate {
         let bh = L.boardBottom - L.boardTop
 
         // Board shadow + wood
-        emit(.rect, x: cx, y: cy + 6, w: boardW, h: bh, c1: [0, 0, 0, 0.55], p1: 4, soft: 12)
-        emit(.wood, x: cx, y: cy, w: boardW, h: bh, c1: theme.wood1, c2: theme.wood2, p1: 2)
-        // Binding along both long edges
-        emit(.rect, x: cx, y: L.boardTop + 0.9, w: boardW, h: 1.8, c1: theme.binding)
-        emit(.rect, x: cx, y: L.boardBottom - 0.9, w: boardW, h: 1.8, c1: theme.binding)
+        if light {
+            emit(.rect, x: cx, y: cy, w: boardW, h: bh, c1: [0.965, 0.962, 0.955, 1], p1: 2)
+            emit(.rect, x: cx, y: L.boardTop + 0.6, w: boardW, h: 1.2, c1: [0.55, 0.55, 0.55, 1])
+            emit(.rect, x: cx, y: L.boardBottom - 0.6, w: boardW, h: 1.2, c1: [0.55, 0.55, 0.55, 1])
+        } else {
+            emit(.rect, x: cx, y: cy + 6, w: boardW, h: bh, c1: [0, 0, 0, 0.55], p1: 4, soft: 12)
+            emit(.wood, x: cx, y: cy, w: boardW, h: bh, c1: theme.wood1, c2: theme.wood2, p1: 2)
+            // Binding along both long edges
+            emit(.rect, x: cx, y: L.boardTop + 0.9, w: boardW, h: 1.8, c1: theme.binding)
+            emit(.rect, x: cx, y: L.boardBottom - 0.9, w: boardW, h: 1.8, c1: theme.binding)
+        }
+        let inlay1: SIMD4<Float> = light ? [0.84, 0.84, 0.82, 1] : theme.inlay1
+        let inlay2: SIMD4<Float> = light ? [0.80, 0.80, 0.79, 1] : theme.inlay2
 
         // Inlays
         let single: Set<Int> = [3, 5, 7, 9, 15, 17, 19, 21]
@@ -246,11 +265,11 @@ final class FretboardRenderer: NSObject, MTKViewDelegate {
         for f in 1...L.frets {
             let x = L.cellCenterX(f)
             if single.contains(f) {
-                emit(.inlay, x: x, y: cy, w: ir * 2, h: ir * 2, c1: theme.inlay1, c2: theme.inlay2)
+                emit(.inlay, x: x, y: cy, w: ir * 2, h: ir * 2, c1: inlay1, c2: inlay2)
             } else if double.contains(f) {
                 let off = bh * 0.25
-                emit(.inlay, x: x, y: cy - off, w: ir * 2, h: ir * 2, c1: theme.inlay1, c2: theme.inlay2)
-                emit(.inlay, x: x, y: cy + off, w: ir * 2, h: ir * 2, c1: theme.inlay1, c2: theme.inlay2)
+                emit(.inlay, x: x, y: cy - off, w: ir * 2, h: ir * 2, c1: inlay1, c2: inlay2)
+                emit(.inlay, x: x, y: cy + off, w: ir * 2, h: ir * 2, c1: inlay1, c2: inlay2)
             }
         }
 
@@ -258,13 +277,21 @@ final class FretboardRenderer: NSObject, MTKViewDelegate {
         for f in 1...L.frets {
             let x = L.fretX(f)
             let w: Float = f > 16 ? 2.0 : 2.5
-            emit(.rect, x: x + 1.6, y: cy, w: w, h: bh, c1: [0, 0, 0, 0.3], soft: 1.5)
-            emit(.rect, x: x, y: cy, w: w, h: bh - 3.6, c1: [0.56, 0.56, 0.55, 1], c2: [0.95, 0.95, 0.93, 1], p1: 1, p3: 1)
+            if light {
+                emit(.rect, x: x, y: cy, w: w * 0.8, h: bh - 2.4, c1: [0.62, 0.62, 0.62, 1])
+            } else {
+                emit(.rect, x: x + 1.6, y: cy, w: w, h: bh, c1: [0, 0, 0, 0.3], soft: 1.5)
+                emit(.rect, x: x, y: cy, w: w, h: bh - 3.6, c1: [0.56, 0.56, 0.55, 1], c2: [0.95, 0.95, 0.93, 1], p1: 1, p3: 1)
+            }
         }
 
         // Nut
-        emit(.rect, x: L.nutX + 2, y: cy, w: 7, h: bh + 4, c1: [0, 0, 0, 0.5], soft: 3)
-        emit(.rect, x: L.nutX - 4, y: cy, w: 8, h: bh + 4, c1: [0.80, 0.77, 0.68, 1], c2: [0.99, 0.97, 0.91, 1], p1: 2, p3: 1)
+        if light {
+            emit(.rect, x: L.nutX - 3, y: cy, w: 6, h: bh + 2, c1: [0.22, 0.22, 0.24, 1], p1: 1)
+        } else {
+            emit(.rect, x: L.nutX + 2, y: cy, w: 7, h: bh + 4, c1: [0, 0, 0, 0.5], soft: 3)
+            emit(.rect, x: L.nutX - 4, y: cy, w: 8, h: bh + 4, c1: [0.80, 0.77, 0.68, 1], c2: [0.99, 0.97, 0.91, 1], p1: 2, p3: 1)
+        }
 
         // Strings
         let x0 = L.labelX + 20
@@ -277,25 +304,31 @@ final class FretboardRenderer: NSObject, MTKViewDelegate {
             let t = max(0, min(1, (Float(midi) - 28) / 40))
             let th: Float = 3.8 - 2.6 * t
             let wound = midi < 55
-            emit(.rect, x: sxc, y: y + 2.6, w: sw, h: th, c1: [0, 0, 0, 0.45], p1: th / 2, soft: 1.8)
-            emit(.string, x: sxc, y: y, w: sw, h: th,
-                 c1: wound ? [0.88, 0.78, 0.60, 1] : [0.94, 0.94, 0.97, 1],
-                 c2: wound ? [0.30, 0.23, 0.15, 1] : [0.36, 0.36, 0.40, 1],
-                 p3: wound ? 1 : 0)
+            if light {
+                emit(.rect, x: sxc, y: y, w: sw, h: max(1, th * 0.6), c1: [0.38, 0.38, 0.40, 1])
+            } else {
+                emit(.rect, x: sxc, y: y + 2.6, w: sw, h: th, c1: [0, 0, 0, 0.45], p1: th / 2, soft: 1.8)
+                emit(.string, x: sxc, y: y, w: sw, h: th,
+                     c1: wound ? [0.88, 0.78, 0.60, 1] : [0.94, 0.94, 0.97, 1],
+                     c2: wound ? [0.30, 0.23, 0.15, 1] : [0.36, 0.36, 0.40, 1],
+                     p3: wound ? 1 : 0)
+            }
         }
 
         // Tuning labels
         for s in 0..<min(L.strings, tuning.notes.count) {
             let name = NoteName.from(pitchClass: tuning.notes[s], preferFlats: tuning.prefersFlats).text
             text(name, x: L.labelX, y: L.stringY(s), height: min(L.spacing * 0.62, 22),
-                 color: [0.62, 0.62, 0.66, 1], bold: false)
+                 color: light ? [0.30, 0.30, 0.32, 1] : [0.62, 0.62, 0.66, 1], bold: false)
         }
 
         // Fret numbers
         for f in 1...L.frets {
             let marked = single.contains(f) || double.contains(f)
+            let numStrong: SIMD4<Float> = light ? [0.12, 0.12, 0.14, 1] : [0.78, 0.78, 0.81, 1]
+            let numWeak: SIMD4<Float> = light ? [0.55, 0.55, 0.58, 1] : [0.40, 0.40, 0.44, 1]
             text("\(f)", x: L.noteX(f), y: L.boardBottom + 19, height: 15,
-                 color: marked ? [0.78, 0.78, 0.81, 1] : [0.40, 0.40, 0.44, 1], bold: false)
+                 color: marked ? numStrong : numWeak, bold: false)
         }
 
         // Muted strings in voicing mode
@@ -338,13 +371,13 @@ final class FretboardRenderer: NSObject, MTKViewDelegate {
                 break
             case .ghost:
                 r *= 0.72
-                alpha = 0.3
+                alpha = light ? 0.4 : 0.3
                 base = desaturate(base, 0.6)
             case .chromatic:
                 r *= 0.6
                 alpha = 0.85
-                base = SIMD3<Float>(0.26, 0.26, 0.28)
-                textRGB = SIMD3<Float>(0.80, 0.80, 0.83)
+                base = light ? SIMD3<Float>(0.86, 0.86, 0.87) : SIMD3<Float>(0.26, 0.26, 0.28)
+                textRGB = light ? SIMD3<Float>(0.30, 0.30, 0.32) : SIMD3<Float>(0.80, 0.80, 0.83)
             }
             if m.pos.fret == 0 { r *= 0.92 }
 
@@ -361,7 +394,7 @@ final class FretboardRenderer: NSObject, MTKViewDelegate {
             r *= 0.55 + 0.45 * e
             alpha *= e
 
-            emit(.rect, x: x, y: y + 1.5, w: r * 2, h: r * 2, c1: [0, 0, 0, 0.4 * alpha], p1: r, soft: 2.5)
+            emit(.rect, x: x, y: y + 1.5, w: r * 2, h: r * 2, c1: [0, 0, 0, (light ? 0.12 : 0.4) * alpha], p1: r, soft: 2.5)
             emit(.marker, x: x, y: y, w: r * 2, h: r * 2,
                  c1: rgba(base, alpha), c2: rgba(base * 0.62, alpha),
                  soft: glow > 0 ? r * 1.3 : 0, p3: glow)
@@ -369,13 +402,13 @@ final class FretboardRenderer: NSObject, MTKViewDelegate {
             if m.role == .accent {
                 let th: Float = 1.5
                 let rr = r + 2.5
-                emit(.ring, x: x, y: y, w: (rr + th) * 2, h: (rr + th) * 2, c1: [0.96, 0.84, 0.52, 0.85 * alpha], p1: th)
+                emit(.ring, x: x, y: y, w: (rr + th) * 2, h: (rr + th) * 2, c1: light ? [0.80, 0.58, 0.10, 0.95 * alpha] : [0.96, 0.84, 0.52, 0.85 * alpha], p1: th)
             }
 
             if m.role == .bass {
                 let th: Float = 1.8
                 let rr = r + 3
-                emit(.ring, x: x, y: y, w: (rr + th) * 2, h: (rr + th) * 2, c1: [1, 1, 1, 0.9 * alpha], p1: th)
+                emit(.ring, x: x, y: y, w: (rr + th) * 2, h: (rr + th) * 2, c1: light ? [0.12, 0.12, 0.14, 0.9 * alpha] : [1, 1, 1, 0.9 * alpha], p1: th)
             }
 
             if !m.label.isEmpty {

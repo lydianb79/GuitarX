@@ -33,7 +33,7 @@ enum PDFExporter {
         guard let renderer = state.renderer else { return nil }
         let width = 1400
         let height = Int(FretboardLayout.idealHeight(strings: state.tuning.notes.count))
-        guard let image = renderer.renderImage(width: width, height: height) else { return nil }
+        guard let image = renderer.renderImage(width: width, height: height, light: state.pdfPrintFriendly) else { return nil }
         return Item(title: state.title, subtitle: state.subtitle, detail: detailLine(state), image: image)
     }
 
@@ -53,8 +53,7 @@ enum PDFExporter {
         switch state.mode {
         case .scale:
             let saved = state.scalePosition
-            let count = state.positionSystem == .boxes ? state.scalePositions.count : state.scaleCAGEDShapes.count
-            for p in 0...count { state.scalePosition = p; grab() }
+            for p in 0...state.positionCount { state.scalePosition = p; grab() }
             state.scalePosition = saved
 
         case .chord:

@@ -37,6 +37,8 @@ struct ContentView: View {
                     Menu {
                         Button("This View…") { PDFExporter.exportCurrentView(state: state) }
                         Button("\(state.exportAllLabel)…") { PDFExporter.exportAll(state: state) }
+                        Divider()
+                        Toggle("Print-Friendly (Light)", isOn: $state.pdfPrintFriendly)
                     } label: {
                         Label("Export PDF", systemImage: "square.and.arrow.up")
                     }
@@ -384,7 +386,7 @@ struct PositionSelector: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .controlSize(.small)
-                .frame(width: 130)
+                .frame(width: 190)
             }
             HStack(spacing: 4) {
                 PillButton(title: "All", selected: state.scalePosition == 0) { state.scalePosition = 0 }
@@ -392,6 +394,10 @@ struct PositionSelector: View {
                     let count = state.scalePositions.count
                     ForEach(Array(1...max(count, 1)), id: \.self) { i in
                         PillButton(title: "\(i)", selected: state.scalePosition == i) { state.scalePosition = i }
+                    }
+                } else if state.positionSystem == .nps {
+                    ForEach(Array(state.npsPatterns.enumerated()), id: \.offset) { i, _ in
+                        PillButton(title: "\(i + 1)", selected: state.scalePosition == i + 1) { state.scalePosition = i + 1 }
                     }
                 } else {
                     ForEach(Array(state.scaleCAGEDShapes.enumerated()), id: \.offset) { i, s in
@@ -425,6 +431,13 @@ struct PositionSelector: View {
                 return "\(s.shape.rawValue) shape · frets \(lo)–\(hi) · ringed = \(s.shape.rawValue) chord"
             }
             return "Whole neck"
+        case .nps:
+            let n = state.notesPerString
+            if let p = state.selectedNPSPattern {
+                let name = state.rootName.adding(state.scale.intervals[max(0, min(p.startDegree - 1, state.scale.intervals.count - 1))]).text
+                return "\(n) notes per string · starts on \(name) (degree \(p.startDegree)) · frets \(p.minFret)–\(p.maxFret)"
+            }
+            return "Whole neck · \(n) notes per string"
         }
     }
 }

@@ -26,6 +26,7 @@ Or open `Package.swift` in Xcode and press ⌘R.
   - *Scale mode:* positions can be 5-fret boxes or the five CAGED shapes in neck order. The notes of the shape's chord get a gold ring. Minor scales use the minor CAGED shapes.
   - *Chord mode:* a third view next to *Voicings* and *All Tones* shows the exact C·A·G·E·D grips for major, minor, 7, maj7 and m7 chords. For other chord types it shows the chord tones inside each shape's area of the neck.
   - Works in any tuning whose 6 strings follow standard intervals (E, E♭ and D standard, and the top 6 strings of a 7- or 8-string).
+- **3-notes-per-string (3NPS):** a third position system next to Boxes and CAGED. It gives one fingering starting on each scale degree, with exactly three notes per string (two for pentatonics and other scales with fewer than 7 notes). It works in any tuning.
 - **Progression mode:**
   - Type Roman numerals (`I V vi IV`, `ii7 V7 Imaj7`, `i bVII bVI V`, `V7b9`, `vii°7` …), load one of 18 presets (pop, jazz ii–V–I, 12-bar blues, Andalusian, Canon …), or click diatonic triads or 7ths from any 7-note scale to add them.
   - Each chord gets a voicing chosen for smooth voice leading near a fret you set, optionally using inversions. Slash chords are labelled.
@@ -34,7 +35,8 @@ Or open `Package.swift` in Xcode and press ⌘R.
 - **PDF export:**
   - *This View* (⌘E) saves one page with the title, the notes and their intervals, the grip, and a high-resolution Metal render of the fretboard.
   - *All…* (⇧⌘E) saves a multi-page sheet with two diagrams per page: every scale position or CAGED shape, every CAGED chord shape, the first 30 voicings, every inversion, or every chord of the progression.
-  - Both options are in the File menu and the export button next to Play.
+  - Both options are in the File menu and the toolbar's Export button.
+  - *Print-Friendly* (on by default) renders the diagrams on white, with a light fretboard and dark strings and labels, to save ink. Turn it off to export the dark on-screen look.
 - **Labels:** note names, intervals, scale degrees, or none. Colours follow interval function (root, 3rd, 5th, 7th, …).
 - **Instrument:** 16 tunings (standard, drop tunings, open tunings, DADGAD, 7- and 8-string, bass, ukulele), 12–24 frets, left-handed mode.
 - **Sound:** click any fret to hear the note, or press **Space** to play the scale run or strum the voicing (a built-in plucked-string synth).
