@@ -116,7 +116,7 @@ final class AppState: ObservableObject {
         }
     }
     @Published var fretCount: Int = 22 { didSet { voicingIndex = 0 } }
-    @Published var wood: WoodStyle = .rosewood
+    @Published var wood: WoodStyle = .ebony
 
     // Display
     @Published var labelMode: LabelMode = .notes
