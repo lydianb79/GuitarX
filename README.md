@@ -22,6 +22,14 @@ Or open `Package.swift` in Xcode and press ⌘R.
 - **Chords (~50) with every inversion:** triads, 6ths, 7ths, added-tone chords, 9ths, 11ths, 13ths and altered dominants.
   - *Voicings* mode finds playable grips for the chosen inversion (the lowest note is the inversion's bass) across the whole neck, and lets you filter by number of strings. For example, choose 3 strings to study triad inversions on each string set.
   - *All Tones* mode shows every chord tone on the neck, with the bass note ringed.
+- **CAGED system:**
+  - *Scale mode:* positions can be 5-fret boxes or the five CAGED shapes in neck order. The notes of the shape's chord get a gold ring. Minor scales use the minor CAGED shapes.
+  - *Chord mode:* a third view next to *Voicings* and *All Tones* shows the exact C·A·G·E·D grips for major, minor, 7, maj7 and m7 chords. For other chord types it shows the chord tones inside each shape's area of the neck.
+  - Works in any tuning whose 6 strings follow standard intervals (E, E♭ and D standard, and the top 6 strings of a 7- or 8-string).
+- **Progression mode:**
+  - Type Roman numerals (`I V vi IV`, `ii7 V7 Imaj7`, `i bVII bVI V`, `V7b9`, `vii°7` …), load one of 18 presets (pop, jazz ii–V–I, 12-bar blues, Andalusian, Canon …), or click diatonic triads or 7ths from any 7-note scale to add them.
+  - Each chord gets a voicing chosen for smooth voice leading near a fret you set, optionally using inversions. Slash chords are labelled.
+  - Playback has tempo, beats per chord and loop settings, and the fretboard follows along as it plays.
 - **Navigation:** scale positions (whole neck or 5-fret boxes), diatonic 7th chords for any 7-note scale (click one to jump to it), and note chips you can click to hide or show each interval.
 - **Labels:** note names, intervals, scale degrees, or none. Colours follow interval function (root, 3rd, 5th, 7th, …).
 - **Instrument:** 16 tunings (standard, drop tunings, open tunings, DADGAD, 7- and 8-string, bass, ukulele), 12–24 frets, left-handed mode.
@@ -31,11 +39,12 @@ Or open `Package.swift` in Xcode and press ⌘R.
 
 | Keys | Action |
 |---|---|
-| Space | Play scale / chord |
-| ⌘1 / ⌘2 | Scale mode / Chord mode |
+| Space (or ⌘↩) | Play / stop |
+| ⌘1 / ⌘2 / ⌘3 | Scale / Chord / Progression mode |
 | ⌘← / ⌘→ | Key down / up a semitone |
 | ⌘↑ / ⌘↓ | Key up / down a fifth |
-| ⌥← / ⌥→ | Previous / next position or voicing |
+| ⌥← / ⌥→ | Previous / next position, voicing, CAGED shape or progression chord |
+| ⇧⌘C | Switch to CAGED view |
 | ⇧⌘I | Next inversion |
 | ⇧⌘N / ⇧⌘T | Show note names / intervals |
 
@@ -46,6 +55,8 @@ Or open `Package.swift` in Xcode and press ⌘R.
 | `Theory.swift` | Notes, intervals, enharmonic spelling |
 | `Library.swift` | Scales, modes, chords, tunings |
 | `Voicings.swift` | Playable chord-voicing search |
+| `CAGED.swift` | CAGED shape templates and placement |
+| `Progression.swift` | Roman-numeral parser and progression presets |
 | `AppState.swift` | Selection state, fretboard model, playback |
 | `Renderer.swift`, `Shaders.swift` | Metal renderer and MSL shaders |
 | `LabelAtlas.swift` | CoreText → Metal glyph atlas |

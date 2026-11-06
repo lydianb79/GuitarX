@@ -8,7 +8,7 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             SidebarView()
-                .navigationSplitViewColumnWidth(min: 290, ideal: 310, max: 380)
+                .navigationSplitViewColumnWidth(min: 300, ideal: 320, max: 400)
         } detail: {
             VStack(spacing: 0) {
                 HeaderView()
@@ -45,18 +45,18 @@ struct HeaderView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 7)
                     .background(Capsule().fill(Color.white.opacity(0.07)))
-                    .transition(.opacity)
             }
             Button {
                 state.playSelection()
             } label: {
-                Label("Play", systemImage: "play.fill")
+                Label(state.isPlaying ? "Stop" : "Play",
+                      systemImage: state.isPlaying ? "stop.fill" : "play.fill")
                     .font(.system(size: 13, weight: .semibold))
                     .padding(.horizontal, 6)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .help("Play the scale / chord (Space)")
+            .help("Play / stop (Space)")
         }
         .padding(.horizontal, 24)
         .padding(.top, 18)
@@ -64,7 +64,7 @@ struct HeaderView: View {
     }
 }
 
-// MARK: - Info panel
+// MARK: - Shared bits
 
 struct SectionLabel: View {
     let text: String
@@ -77,6 +77,57 @@ struct SectionLabel: View {
     }
 }
 
+struct PillButton: View {
+    let title: String
+    let selected: Bool
+    var minWidth: CGFloat = 28
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .frame(minWidth: minWidth, minHeight: 26)
+                .padding(.horizontal, 3)
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(selected ? Color.accentColor : Color.white.opacity(0.07)))
+                .foregroundStyle(selected ? Color.white : Color.primary)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct ChordChip: View {
+    let top: String
+    let bottom: String
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Text(top)
+                    .font(.system(size: 11, weight: .bold, design: .serif))
+                    .foregroundStyle(selected ? Color.white.opacity(0.85) : Color.secondary)
+                Text(bottom)
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundStyle(selected ? Color.white : Color.primary)
+            }
+            .frame(minWidth: 62, minHeight: 46)
+            .padding(.horizontal, 4)
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(selected ? Color.accentColor : Color.white.opacity(0.06)))
+            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .strokeBorder(Color.white.opacity(selected ? 0 : 0.09)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Info panel
+
 struct InfoPanel: View {
     @EnvironmentObject var state: AppState
 
@@ -88,10 +139,10 @@ struct InfoPanel: View {
                     NotesRow()
                 }
                 Spacer(minLength: 0)
-                if state.mode == .chord {
-                    VoicingNavigator()
-                } else {
-                    PositionSelector()
+                switch state.mode {
+                case .chord: VoicingNavigator()
+                case .scale: PositionSelector()
+                case .progression: ProgressionVoicingInfo()
                 }
             }
             if state.mode == .scale && !state.harmonized.isEmpty {
@@ -99,6 +150,9 @@ struct InfoPanel: View {
                     SectionLabel("DIATONIC 7TH CHORDS  ·  CLICK TO EXPLORE")
                     HarmonyRow()
                 }
+            }
+            if state.mode == .progression {
+                ProgressionPanel()
             }
         }
         .padding(.horizontal, 24)
@@ -145,7 +199,8 @@ struct VoicingNavigator: View {
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 8) {
-            if state.chordDisplay == .voicings {
+            switch state.chordDisplay {
+            case .voicings:
                 SectionLabel("VOICING  ·  ⌥← ⌥→")
                 let all = state.voicings
                 if let v = state.currentVoicing {
@@ -172,13 +227,39 @@ struct VoicingNavigator: View {
                         .multilineTextAlignment(.trailing)
                         .foregroundStyle(.secondary)
                 }
-            } else {
+
+            case .allTones:
                 SectionLabel("ALL CHORD TONES")
                 Text(state.inversion == 0
                      ? "Root position"
                      : "Bass (ringed): \(state.rootName.adding(state.bassInterval).text)")
                     .font(.callout)
                     .foregroundStyle(.secondary)
+
+            case .caged:
+                SectionLabel("CAGED SHAPE  ·  ⌥← ⌥→")
+                let shapes = state.chordCAGEDShapes
+                if shapes.isEmpty {
+                    Text("CAGED needs a 6-string tuning\nin standard intervals")
+                        .font(.callout)
+                        .multilineTextAlignment(.trailing)
+                        .foregroundStyle(.secondary)
+                } else {
+                    HStack(spacing: 4) {
+                        ForEach(Array(shapes.enumerated()), id: \.offset) { i, s in
+                            PillButton(title: s.shape.rawValue,
+                                       selected: min(state.cagedIndex, shapes.count - 1) == i,
+                                       minWidth: 34) { state.cagedIndex = i }
+                        }
+                    }
+                    if let s = state.currentChordShape {
+                        Text(state.chordHasExactCAGED
+                             ? "\(s.voicing.shorthand)  ·  frets \(s.minFret)–\(s.maxFret)"
+                             : "Chord tones in the \(s.shape.rawValue)-shape region, frets \(s.minFret)–\(s.maxFret)")
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
         }
     }
@@ -188,48 +269,53 @@ struct PositionSelector: View {
     @EnvironmentObject var state: AppState
 
     var body: some View {
-        let positions = state.scalePositions
         VStack(alignment: .trailing, spacing: 8) {
-            SectionLabel("POSITION  ·  ⌥← ⌥→")
+            HStack(spacing: 10) {
+                SectionLabel("POSITION  ·  ⌥← ⌥→")
+                Picker("System", selection: $state.positionSystem) {
+                    ForEach(PositionSystem.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 140)
+            }
             HStack(spacing: 4) {
-                PositionButton(title: "All", index: 0)
-                ForEach(Array(1...max(positions.count, 1)), id: \.self) { i in
-                    PositionButton(title: "\(i)", index: i)
+                PillButton(title: "All", selected: state.scalePosition == 0) { state.scalePosition = 0 }
+                if state.positionSystem == .boxes {
+                    let count = state.scalePositions.count
+                    ForEach(Array(1...max(count, 1)), id: \.self) { i in
+                        PillButton(title: "\(i)", selected: state.scalePosition == i) { state.scalePosition = i }
+                    }
+                } else {
+                    ForEach(Array(state.scaleCAGEDShapes.enumerated()), id: \.offset) { i, s in
+                        PillButton(title: s.shape.rawValue, selected: state.scalePosition == i + 1, minWidth: 34) {
+                            state.scalePosition = i + 1
+                        }
+                    }
                 }
             }
-            if state.scalePosition > 0 && state.scalePosition <= positions.count {
-                let r = positions[state.scalePosition - 1]
-                Text("Frets \(r.lowerBound)–\(r.upperBound)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("Whole neck")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            Text(caption)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
-}
 
-struct PositionButton: View {
-    @EnvironmentObject var state: AppState
-    let title: String
-    let index: Int
-
-    var body: some View {
-        let selected = state.scalePosition == index
-        Button {
-            state.scalePosition = index
-        } label: {
-            Text(title)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .frame(minWidth: 28, minHeight: 26)
-                .padding(.horizontal, 3)
-                .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(selected ? Color.accentColor : Color.white.opacity(0.07)))
-                .foregroundStyle(selected ? Color.white : Color.primary)
+    private var caption: String {
+        switch state.positionSystem {
+        case .boxes:
+            let p = state.scalePositions
+            if state.scalePosition > 0 && state.scalePosition <= p.count {
+                let r = p[state.scalePosition - 1]
+                return "Frets \(r.lowerBound)–\(r.upperBound)"
+            }
+            return "Whole neck"
+        case .caged:
+            if state.scaleCAGEDShapes.isEmpty { return "CAGED needs a 6-string tuning in standard intervals" }
+            if let s = state.selectedScaleShape {
+                return "\(s.shape.rawValue) shape · frets \(max(0, s.minFret - 1))–\(s.maxFret + 1) · ringed notes = chord shape"
+            }
+            return "Whole neck"
         }
-        .buttonStyle(.plain)
     }
 }
 
@@ -239,23 +325,103 @@ struct HarmonyRow: View {
     var body: some View {
         HStack(spacing: 7) {
             ForEach(state.harmonized) { h in
-                Button {
-                    state.select(h)
-                } label: {
+                ChordChip(top: h.numeral, bottom: h.name, selected: false) { state.select(h) }
+                    .disabled(h.chord == nil)
+            }
+        }
+    }
+}
+
+// MARK: - Progression
+
+struct ProgressionVoicingInfo: View {
+    @EnvironmentObject var state: AppState
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 8) {
+            SectionLabel("CHORD  ·  ⌥← ⌥→")
+            if let step = state.currentStep {
+                HStack(spacing: 10) {
+                    Button { state.step(-1) } label: { Image(systemName: "chevron.left").frame(width: 14) }
                     VStack(spacing: 2) {
-                        Text(h.numeral)
-                            .font(.system(size: 11, weight: .bold, design: .serif))
-                            .foregroundStyle(.secondary)
-                        Text(h.name)
-                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        Text("\(step.id + 1) / \(state.progression.count)")
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                        if let v = state.displayedVoicing {
+                            Text(v.shorthand)
+                                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text(step.chord.name)
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                    .frame(minWidth: 66, minHeight: 46)
-                    .padding(.horizontal, 4)
-                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.white.opacity(0.06)))
-                    .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Color.white.opacity(0.09)))
+                    .frame(minWidth: 120)
+                    Button { state.step(1) } label: { Image(systemName: "chevron.right").frame(width: 14) }
                 }
-                .buttonStyle(.plain)
-                .disabled(h.chord == nil)
+                .buttonStyle(.bordered)
+            } else {
+                Text("No chords yet")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+struct ProgressionPanel: View {
+    @EnvironmentObject var state: AppState
+
+    var body: some View {
+        let steps = state.progression
+        let current = state.currentStep?.id ?? -1
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    SectionLabel("PROGRESSION IN \(state.rootName.text.uppercased())  ·  CLICK A CHORD  ·  SPACE PLAYS")
+                    Spacer()
+                    Button("Remove Last") { state.removeLastFromProgression() }
+                        .disabled(steps.isEmpty)
+                    Button("Clear") { state.progressionText = "" }
+                        .disabled(steps.isEmpty)
+                }
+                .controlSize(.small)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 7) {
+                        ForEach(steps) { step in
+                            ChordChip(top: state.displayToken(step.token), bottom: step.name,
+                                      selected: step.id == current) {
+                                state.progressionStep = step.id
+                            }
+                        }
+                    }
+                }
+                if steps.isEmpty {
+                    Text("Empty. Load a preset, type numerals in the sidebar, or add chords below.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            let diatonic = state.harmonize(sevenths: state.harmonySevenths)
+            if !diatonic.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 12) {
+                        SectionLabel("ADD CHORD FROM \(state.rootName.text.uppercased()) \(state.scale.name.uppercased())")
+                        Toggle("7ths", isOn: $state.harmonySevenths)
+                            .toggleStyle(.switch)
+                            .controlSize(.mini)
+                    }
+                    HStack(spacing: 7) {
+                        ForEach(diatonic) { h in
+                            ChordChip(top: h.numeral, bottom: h.name, selected: false) {
+                                if let t = h.token { state.appendToProgression(t) }
+                            }
+                            .disabled(h.token == nil)
+                        }
+                    }
+                }
             }
         }
     }
@@ -289,56 +455,10 @@ struct SidebarView: View {
                 .pickerStyle(.segmented)
             }
 
-            if state.mode == .scale {
-                Section("Scale / Mode") {
-                    Picker("Scale", selection: $state.scaleID) {
-                        ForEach(ScaleLibrary.categories, id: \.self) { cat in
-                            Section(header: Text(cat)) {
-                                ForEach(ScaleLibrary.all.filter { $0.category == cat }) { s in
-                                    Text(s.name).tag(s.id)
-                                }
-                            }
-                        }
-                    }
-                    LabeledContent("Formula") {
-                        Text(state.scale.formula)
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    }
-                }
-            } else {
-                Section("Chord") {
-                    Picker("Chord", selection: $state.chordID) {
-                        ForEach(ChordLibrary.categories, id: \.self) { cat in
-                            Section(header: Text(cat)) {
-                                ForEach(ChordLibrary.all.filter { $0.category == cat }) { c in
-                                    Text("\(state.rootName.text)\(c.symbol)  —  \(c.name)").tag(c.id)
-                                }
-                            }
-                        }
-                    }
-                    Picker("Inversion", selection: $state.inversion) {
-                        ForEach(0..<state.chord.intervals.count, id: \.self) { i in
-                            let bass = state.rootName.adding(state.chord.intervals[i]).text
-                            Text("\(state.inversionName(i))  (bass \(bass))").tag(i)
-                        }
-                    }
-                    Picker("Show", selection: $state.chordDisplay) {
-                        ForEach(ChordDisplay.allCases) { Text($0.rawValue).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    if state.chordDisplay == .voicings {
-                        Picker("Strings", selection: $state.voicingStrings) {
-                            Text("Any (4+)").tag(0)
-                            ForEach(Array(2...max(state.tuning.notes.count, 2)), id: \.self) { n in
-                                Text("\(n) strings").tag(n)
-                            }
-                        }
-                    }
-                    LabeledContent("Formula") {
-                        Text(state.chord.formula)
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    }
-                }
+            switch state.mode {
+            case .scale: scaleSection
+            case .chord: chordSection
+            case .progression: progressionSections
             }
 
             Section("Display") {
@@ -366,6 +486,119 @@ struct SidebarView: View {
         .formStyle(.grouped)
         .toggleStyle(.switch)
         .controlSize(.small)
+    }
+
+    private var scalePicker: some View {
+        Picker("Scale", selection: $state.scaleID) {
+            ForEach(ScaleLibrary.categories, id: \.self) { cat in
+                Section(header: Text(cat)) {
+                    ForEach(ScaleLibrary.all.filter { $0.category == cat }) { s in
+                        Text(s.name).tag(s.id)
+                    }
+                }
+            }
+        }
+    }
+
+    private var stringsPicker: some View {
+        Picker("Strings", selection: $state.voicingStrings) {
+            Text("Any (4+)").tag(0)
+            ForEach(Array(2...max(state.tuning.notes.count, 2)), id: \.self) { n in
+                Text("\(n) strings").tag(n)
+            }
+        }
+    }
+
+    @ViewBuilder private var scaleSection: some View {
+        Section("Scale / Mode") {
+            scalePicker
+            LabeledContent("Formula") {
+                Text(state.scale.formula)
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+            }
+        }
+    }
+
+    @ViewBuilder private var chordSection: some View {
+        Section("Chord") {
+            Picker("Chord", selection: $state.chordID) {
+                ForEach(ChordLibrary.categories, id: \.self) { cat in
+                    Section(header: Text(cat)) {
+                        ForEach(ChordLibrary.all.filter { $0.category == cat }) { c in
+                            Text("\(state.rootName.text)\(c.symbol)  —  \(c.name)").tag(c.id)
+                        }
+                    }
+                }
+            }
+            Picker("Show", selection: $state.chordDisplay) {
+                ForEach(ChordDisplay.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            Picker("Inversion", selection: $state.inversion) {
+                ForEach(0..<state.chord.intervals.count, id: \.self) { i in
+                    let bass = state.rootName.adding(state.chord.intervals[i]).text
+                    Text("\(state.inversionName(i))  (bass \(bass))").tag(i)
+                }
+            }
+            .disabled(state.chordDisplay == .caged)
+            if state.chordDisplay == .voicings {
+                stringsPicker
+            }
+            LabeledContent("Formula") {
+                Text(state.chord.formula)
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+            }
+        }
+    }
+
+    @ViewBuilder private var progressionSections: some View {
+        Section("Progression") {
+            Menu("Load Preset…") {
+                ForEach(ProgressionLibrary.presets) { p in
+                    Button(p.name) { state.progressionText = p.text }
+                }
+            }
+            TextField("Roman numerals", text: $state.progressionText, axis: .vertical)
+                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                .lineLimit(2...5)
+            let invalid = state.parsedProgression.invalid
+            if !invalid.isEmpty {
+                Text("Not understood: \(invalid.joined(separator: "  "))")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+            Text("I ii iii IV V vi vii°, then 7 · maj7 · ø7 · °7 · 9 · sus4 · 7b9 …  Prefix b or # for borrowed chords (bVII, #iv°).")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            scalePicker
+        }
+        Section("Fretboard") {
+            Picker("Show", selection: $state.progressionDisplay) {
+                ForEach(ProgressionDisplay.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            if state.progressionDisplay == .voicings {
+                stringsPicker
+                Stepper("Around fret \(state.progressionFret)", value: $state.progressionFret,
+                        in: 0...max(0, state.fretCount - 4))
+                Toggle("Use inversions for voice leading", isOn: $state.allowInversions)
+            }
+        }
+        Section("Playback") {
+            LabeledContent("Tempo") {
+                HStack {
+                    Slider(value: $state.tempo, in: 40...220, step: 1)
+                    Text("\(Int(state.tempo))")
+                        .monospacedDigit()
+                        .frame(width: 30, alignment: .trailing)
+                }
+            }
+            Picker("Beats per chord", selection: $state.beatsPerChord) {
+                ForEach([1, 2, 4, 8], id: \.self) { Text("\($0)").tag($0) }
+            }
+            Toggle("Loop", isOn: $state.loopProgression)
+        }
     }
 }
 

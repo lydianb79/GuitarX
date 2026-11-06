@@ -3,6 +3,7 @@ import AVFoundation
 struct SynthNote {
     let midi: Int
     let time: Double
+    var length: Double = 4.5
 }
 
 /// Tiny Karplus–Strong plucked-string synth so you can hear what you see.
@@ -29,9 +30,14 @@ final class GuitarSynth {
         queue.async { [weak self] in self?.render(notes) }
     }
 
+    func stop() {
+        queue.async {
+            DispatchQueue.main.async { [self] in player.stop() }
+        }
+    }
+
     private func render(_ notes: [SynthNote]) {
-        let ring = 2.4
-        let total = (notes.map(\.time).max() ?? 0) + ring
+        let total = notes.map { $0.time + min($0.length, 2.4) }.max() ?? 2.4
         let frames = Int(total * sampleRate)
         guard frames > 0,
               let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames)),
@@ -40,7 +46,7 @@ final class GuitarSynth {
 
         var mix = [Float](repeating: 0, count: frames)
         for n in notes {
-            pluck(&mix, start: Int(n.time * sampleRate), midi: n.midi)
+            pluck(&mix, start: Int(n.time * sampleRate), midi: n.midi, length: n.length)
         }
         var peak: Float = 0.0001
         for v in mix { peak = max(peak, abs(v)) }
@@ -66,7 +72,7 @@ final class GuitarSynth {
         }
     }
 
-    private func pluck(_ out: inout [Float], start: Int, midi: Int) {
+    private func pluck(_ out: inout [Float], start: Int, midi: Int, length noteLength: Double) {
         guard start >= 0, start < out.count else { return }
         let freq = 440.0 * pow(2.0, Double(midi - 69) / 12.0)
         let period = sampleRate / freq - 0.5          // the averaging filter adds half a sample
@@ -87,7 +93,8 @@ final class GuitarSynth {
 
         let t60 = max(1.2, 3.6 - 2.2 * min(1.0, max(0, freq - 80) / 900))
         let loss = Float(pow(0.001, 1.0 / (t60 * freq)))
-        let length = min(out.count - start, Int(sampleRate * 4.5))
+        let length = min(out.count - start, Int(sampleRate * min(noteLength, 4.5)))
+        let fade = min(length, Int(sampleRate * 0.08))
         var idx = 0
         var apX: Float = 0
         var apY: Float = 0
@@ -101,7 +108,9 @@ final class GuitarSynth {
             line[idx] = y
             idx += 1
             if idx == n { idx = 0 }
-            out[start + i] += a * 0.32
+            var gain: Float = 0.32
+            if i > length - fade { gain *= Float(length - i) / Float(max(fade, 1)) }
+            out[start + i] += a * gain
         }
     }
 }

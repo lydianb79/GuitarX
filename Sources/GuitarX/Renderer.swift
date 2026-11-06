@@ -228,9 +228,7 @@ final class FretboardRenderer: NSObject, MTKViewDelegate {
         }
 
         // Muted strings in voicing mode
-        var voicing: Voicing? = nil
-        if state.mode == .chord && state.chordDisplay == .voicings { voicing = state.currentVoicing }
-        if let v = voicing {
+        if let v = state.displayedVoicing {
             for s in 0..<min(L.strings, v.frets.count) where v.frets[s] == nil {
                 text("×", x: L.openX, y: L.stringY(s), height: L.markerRadius * 1.6, color: [1.0, 0.45, 0.40, 0.9])
             }
@@ -264,7 +262,7 @@ final class FretboardRenderer: NSObject, MTKViewDelegate {
             var glow: Float = m.isRoot ? 0.75 : 0
 
             switch m.role {
-            case .active, .bass:
+            case .active, .bass, .accent:
                 break
             case .ghost:
                 r *= 0.74
@@ -298,6 +296,12 @@ final class FretboardRenderer: NSObject, MTKViewDelegate {
                  c1: rgba(base, alpha), c2: rgba(base * 0.55, alpha),
                  soft: glow > 0 ? r * 1.3 : 0, p3: glow)
 
+            if m.role == .accent {
+                let th: Float = 1.8
+                let rr = r + 3
+                emit(.ring, x: x, y: y, w: (rr + th) * 2, h: (rr + th) * 2, c1: [1.0, 0.86, 0.45, 0.9 * alpha], p1: th)
+            }
+
             if m.role == .bass {
                 let th: Float = 2.2
                 let rr = r + 3.5
@@ -325,7 +329,8 @@ final class FretboardRenderer: NSObject, MTKViewDelegate {
         case .chromatic: return 0
         case .ghost: return 1
         case .active: return 2
-        case .bass: return 3
+        case .accent: return 3
+        case .bass: return 4
         }
     }
 }
