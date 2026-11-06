@@ -39,10 +39,6 @@ Or open `Package.swift` in Xcode and press ⌘R.
   - *Print-Friendly* (on by default) renders the diagrams on white, with a light fretboard and dark strings and labels, to save ink. Turn it off to export the dark on-screen look.
 - **Labels:** note names, intervals, scale degrees, or none. Colours follow interval function (root, 3rd, 5th, 7th, …).
 - **Instrument:** 16 tunings (standard, drop tunings, open tunings, DADGAD, 7- and 8-string, bass, ukulele), 12–24 frets, left-handed mode.
-- **Playing chords:**
-  - Click any diatonic chord (Scale mode) or progression chord to hear it; its notes light up on the fretboard. ⌘-click a diatonic chord to open it in Chord mode.
-  - Keys **1–7** play the I–vii chords of the current key in any mode. In Progression mode, **⇧1–7** adds the chord to the progression.
-  - *Chord style* (Strum Down, Strum Up, Arpeggio, Block) applies everywhere, including progression playback.
 - **Sound:** real sampled guitars from the General MIDI sound bank built into macOS: steel-string, nylon, jazz, clean, muted and overdriven electric. Bass tunings switch to fingered bass. Click any fret to hear the note, or press Space to play the scale run, strum the voicing or play the progression. Notes are timed by an `AVAudioSequencer`. A plucked-string synth is still available, and is used automatically if the samples can't be loaded.
 
 ## Keyboard shortcuts
@@ -50,7 +46,6 @@ Or open `Package.swift` in Xcode and press ⌘R.
 | Keys | Action |
 |---|---|
 | Space (or ⌘↩) | Play / stop |
-| 1–7 | Play diatonic chord I–vii (⇧ adds it to the progression) |
 | ⌘1 / ⌘2 / ⌘3 | Scale / Chord / Progression mode |
 | ⌘← / ⌘→ | Key down / up a semitone |
 | ⌘↑ / ⌘↓ | Key up / down a fifth |
